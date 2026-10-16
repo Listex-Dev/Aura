@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
 import android.app.Activity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -33,6 +35,7 @@ import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BrightnessHigh
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FlashlightOff
 import androidx.compose.material.icons.filled.FlashlightOn
 import androidx.compose.material.icons.filled.Home
@@ -42,6 +45,7 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -98,6 +102,14 @@ fun DeviceControlTab(
     val lastA11yReport by AuraAccessibilityService.lastActionReport.collectAsState()
     val a11yActive = isA11yConnected || telemetry.isAccessibilityEnabled
 
+    val allPermissionsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        systemController.refreshTelemetry()
+        val granted = results.values.count { it }
+        onFeedbackSpoken("Разрешения обновлены: активно $granted из ${results.size}")
+    }
+
     var appSearchQuery by remember { mutableStateOf("") }
     var targetAppName by remember { mutableStateOf("YouTube") }
     var inAppActionPayload by remember { mutableStateOf("") }
@@ -131,10 +143,174 @@ fun DeviceControlTab(
                 color = MaterialTheme.colorScheme.onBackground
             )
             Text(
-                text = "Специальные возможности (Accessibility), действия внутри любых приложений и аппаратный контроль",
+                text = "Все системные разрешения, Специальные возможности (Accessibility) и управление любыми приложениями",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+
+        // Full System Permissions Hub Card
+        item {
+            val allRuntimeGranted = telemetry.grantedRuntimePermissionsCount >= telemetry.totalRuntimePermissionsCount
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        1.dp,
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
+                        RoundedCornerShape(24.dp)
+                    ),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primaryContainer),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Security,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Полный доступ и все разрешения",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Базовые права: ${telemetry.grantedRuntimePermissionsCount}/${telemetry.totalRuntimePermissionsCount} • Спец-привилегии Android",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Button(
+                        onClick = {
+                            allPermissionsLauncher.launch(systemController.getRequiredRuntimePermissions())
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("request_all_permissions_button"),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (allRuntimeGranted) {
+                                MaterialTheme.colorScheme.secondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            },
+                            contentColor = if (allRuntimeGranted) {
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onPrimary
+                            }
+                        )
+                    ) {
+                        Icon(
+                            imageVector = if (allRuntimeGranted) Icons.Default.CheckCircle else Icons.Default.Security,
+                            contentDescription = null
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (allRuntimeGranted) {
+                                "Все базовые разрешения выданы (${telemetry.grantedRuntimePermissionsCount}/${telemetry.totalRuntimePermissionsCount})"
+                            } else {
+                                "Выдать все разрешения в 1 клик (Звонки, СМС, Контакты, Камера, Микрофон)"
+                            },
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text(
+                        text = "Специальные привилегии для полного контроля:",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        AssistChip(
+                            onClick = {
+                                val msg = systemController.openAccessibilitySettings()
+                                onFeedbackSpoken(msg)
+                            },
+                            label = {
+                                Text(
+                                    if (a11yActive) "✓ Accessibility ВКЛ" else "Включить Accessibility"
+                                )
+                            }
+                        )
+                        AssistChip(
+                            onClick = {
+                                val msg = systemController.openWriteSettingsAccess()
+                                onFeedbackSpoken(msg)
+                            },
+                            label = {
+                                Text(
+                                    if (telemetry.canWriteSettings) "✓ Системные настройки" else "+ Изменение настроек"
+                                )
+                            }
+                        )
+                        AssistChip(
+                            onClick = {
+                                val msg = systemController.openOverlayAccess()
+                                onFeedbackSpoken(msg)
+                            },
+                            label = {
+                                Text(
+                                    if (telemetry.canDrawOverlays) "✓ Поверх всех окон" else "+ Поверх других окон"
+                                )
+                            }
+                        )
+                        AssistChip(
+                            onClick = {
+                                val msg = systemController.openBatteryOptimizationExemption()
+                                onFeedbackSpoken(msg)
+                            },
+                            label = {
+                                Text(
+                                    if (telemetry.isBatteryUnrestricted) "✓ Фон 24/7 без сна" else "+ Откл. экономию батареи"
+                                )
+                            }
+                        )
+                        AssistChip(
+                            onClick = {
+                                val msg = systemController.openDndPolicyAccess()
+                                onFeedbackSpoken(msg)
+                            },
+                            label = {
+                                Text(
+                                    if (telemetry.hasDndAccess) "✓ Доступ к звуку DND" else "+ Доступ к Не беспокоить"
+                                )
+                            }
+                        )
+                    }
+                }
+            }
         }
 
         // Accessibility Service Full Control Card

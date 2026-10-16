@@ -189,6 +189,39 @@ fun MainAssistantScaffold(
     var showApiKeyDialog by remember { mutableStateOf(false) }
     var apiKeyInput by remember { mutableStateOf(GeminiAssistantService.getSavedApiKey(context)) }
     val snackbarHostState = remember { SnackbarHostState() }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                viewModel.systemController.refreshTelemetry()
+                viewModel.systemController.loadInstalledApps()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    val startupPermissionsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        viewModel.systemController.refreshTelemetry()
+        viewModel.systemController.loadInstalledApps()
+    }
+
+    var initialPermRequested by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (!initialPermRequested) {
+            initialPermRequested = true
+            val required = viewModel.systemController.getRequiredRuntimePermissions()
+            val missing = required.filter { !viewModel.systemController.hasPermission(it) }
+            if (missing.isNotEmpty()) {
+                startupPermissionsLauncher.launch(missing.toTypedArray())
+            }
+        }
+    }
 
     BackHandler(enabled = selectedTab != 0) {
         selectedTab = 0

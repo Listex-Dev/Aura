@@ -1,7 +1,8 @@
 package com.example.system
 
+import android.Manifest
 import android.app.Activity
-import android.app.SearchManager
+import android.app.NotificationManager
 import android.bluetooth.BluetoothManager
 import android.content.ComponentName
 import android.content.Context
@@ -17,12 +18,15 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.AlarmClock
 import android.provider.ContactsContract
 import android.provider.MediaStore
 import android.provider.Settings
+import android.telephony.SmsManager
 import android.view.KeyEvent
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,6 +49,12 @@ data class DeviceTelemetryState(
     val isWifiConnected: Boolean = false,
     val isBluetoothEnabled: Boolean = false,
     val isAccessibilityEnabled: Boolean = false,
+    val canWriteSettings: Boolean = false,
+    val canDrawOverlays: Boolean = false,
+    val hasDndAccess: Boolean = false,
+    val isBatteryUnrestricted: Boolean = false,
+    val grantedRuntimePermissionsCount: Int = 0,
+    val totalRuntimePermissionsCount: Int = 8,
     val installedApps: List<InstalledAppInfo> = emptyList()
 )
 
@@ -53,6 +63,8 @@ class AndroidSystemController(private val context: Context) {
     private val appContext = context.applicationContext
     private val cameraManager = appContext.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+    private val notificationManager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+    private val powerManager = appContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
 
     private var torchCameraId: String? = null
 
@@ -95,6 +107,33 @@ class AndroidSystemController(private val context: Context) {
         }
     }
 
+    fun getRequiredRuntimePermissions(): Array<String> {
+        val list = mutableListOf(
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.CAMERA,
+            Manifest.permission.CALL_PHONE,
+            Manifest.permission.READ_CONTACTS,
+            Manifest.permission.WRITE_CONTACTS,
+            Manifest.permission.SEND_SMS,
+            Manifest.permission.READ_SMS,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.READ_PHONE_STATE
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            list.add(Manifest.permission.BLUETOOTH_CONNECT)
+            list.add(Manifest.permission.BLUETOOTH_SCAN)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            list.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        return list.toTypedArray()
+    }
+
+    fun hasPermission(permission: String): Boolean {
+        return ContextCompat.checkSelfPermission(appContext, permission) == PackageManager.PERMISSION_GRANTED
+    }
+
     fun isAccessibilityServiceEnabled(): Boolean {
         if (AuraAccessibilityService.isConnected.value) return true
         return try {
@@ -120,6 +159,78 @@ class AndroidSystemController(private val context: Context) {
             "Открыты настройки специальных возможностей Android"
         } catch (_: Exception) {
             "Откройте Настройки -> Специальные возможности -> Aura Control"
+        }
+    }
+
+    fun openWriteSettingsAccess(): String {
+        val intent = Intent(
+            Settings.ACTION_MANAGE_WRITE_SETTINGS,
+            Uri.parse("package:${appContext.packageName}")
+        ).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return try {
+            appContext.startActivity(intent)
+            "Разрешите «Изменение системных настроек» для полного управления яркостью и системой"
+        } catch (_: Exception) {
+            openAppDetailsSettings()
+        }
+    }
+
+    fun openOverlayAccess(): String {
+        val intent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:${appContext.packageName}")
+        ).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return try {
+            appContext.startActivity(intent)
+            "Разрешите «Поверх других окон» для работы поверх любых приложений"
+        } catch (_: Exception) {
+            openAppDetailsSettings()
+        }
+    }
+
+    fun openDndPolicyAccess(): String {
+        val intent = Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return try {
+            appContext.startActivity(intent)
+            "Разрешите доступ к режиму «Не беспокоить» для управления звуком"
+        } catch (_: Exception) {
+            openAppDetailsSettings()
+        }
+    }
+
+    fun openBatteryOptimizationExemption(): String {
+        val intent = Intent(
+            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+            Uri.parse("package:${appContext.packageName}")
+        ).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return try {
+            appContext.startActivity(intent)
+            "Запрошено отключение ограничений батареи для фоновой работы 24/7"
+        } catch (_: Exception) {
+            openAppDetailsSettings()
+        }
+    }
+
+    fun openAppDetailsSettings(): String {
+        val intent = Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.parse("package:${appContext.packageName}")
+        ).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return try {
+            appContext.startActivity(intent)
+            "Открыты системные разрешения приложения Aura Control"
+        } catch (_: Exception) {
+            "Откройте настройки приложения Aura Control"
         }
     }
 
@@ -154,6 +265,17 @@ class AndroidSystemController(private val context: Context) {
         }
 
         val a11yEnabled = isAccessibilityServiceEnabled()
+        val writeSettings = try { Settings.System.canWrite(appContext) } catch (_: Exception) { false }
+        val drawOverlays = try { Settings.canDrawOverlays(appContext) } catch (_: Exception) { false }
+        val dndAccess = try { notificationManager?.isNotificationPolicyAccessGranted == true } catch (_: Exception) { false }
+        val batteryUnrestricted = try {
+            powerManager?.isIgnoringBatteryOptimizations(appContext.packageName) == true
+        } catch (_: Exception) {
+            false
+        }
+
+        val allRuntimePerms = getRequiredRuntimePermissions()
+        val grantedCount = allRuntimePerms.count { hasPermission(it) }
 
         _telemetry.update {
             it.copy(
@@ -165,6 +287,12 @@ class AndroidSystemController(private val context: Context) {
                 isWifiConnected = wifiOn,
                 isBluetoothEnabled = btOn,
                 isAccessibilityEnabled = a11yEnabled,
+                canWriteSettings = writeSettings,
+                canDrawOverlays = drawOverlays,
+                hasDndAccess = dndAccess,
+                isBatteryUnrestricted = batteryUnrestricted,
+                grantedRuntimePermissionsCount = grantedCount,
+                totalRuntimePermissionsCount = allRuntimePerms.size,
                 screenBrightnessPercent = sysBrightness
             )
         }
@@ -246,7 +374,23 @@ class AndroidSystemController(private val context: Context) {
     }
 
     fun setBrightness(activity: Activity?, percent: Int): String {
-        val cleanPct = percent.coerceIn(10, 100)
+        val cleanPct = percent.coerceIn(5, 100)
+        try {
+            if (Settings.System.canWrite(appContext)) {
+                val sysValue = ((cleanPct / 100f) * 255).toInt().coerceIn(10, 255)
+                Settings.System.putInt(
+                    appContext.contentResolver,
+                    Settings.System.SCREEN_BRIGHTNESS_MODE,
+                    Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
+                )
+                Settings.System.putInt(
+                    appContext.contentResolver,
+                    Settings.System.SCREEN_BRIGHTNESS,
+                    sysValue
+                )
+            }
+        } catch (_: Exception) {
+        }
         try {
             activity?.window?.let { window ->
                 val params = window.attributes
@@ -552,13 +696,42 @@ class AndroidSystemController(private val context: Context) {
         if (trimmed.any { it.isDigit() }) {
             return trimmed.filter { it.isDigit() || it == '+' }
         }
+        if (trimmed.isNotEmpty() && hasPermission(Manifest.permission.READ_CONTACTS)) {
+            try {
+                val projection = arrayOf(
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER
+                )
+                val selection = "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?"
+                val selectionArgs = arrayOf("%$trimmed%")
+                appContext.contentResolver.query(
+                    ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                    projection,
+                    selection,
+                    selectionArgs,
+                    null
+                )?.use { cursor ->
+                    val numIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                    if (numIdx >= 0 && cursor.moveToFirst()) {
+                        val rawNumber = cursor.getString(numIdx).orEmpty()
+                        val cleaned = rawNumber.filter { it.isDigit() || it == '+' }
+                        if (cleaned.isNotEmpty()) return cleaned
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
         return ""
     }
 
     fun callContactOrNumber(target: String): String {
         val resolved = resolveContactPhone(target)
+        val canDirectCall = hasPermission(Manifest.permission.CALL_PHONE)
         val intent = if (resolved.isNotEmpty()) {
-            Intent(Intent.ACTION_DIAL, Uri.parse("tel:$resolved"))
+            Intent(
+                if (canDirectCall) Intent.ACTION_CALL else Intent.ACTION_DIAL,
+                Uri.parse("tel:$resolved")
+            )
         } else {
             Intent(Intent.ACTION_VIEW, ContactsContract.Contacts.CONTENT_URI)
         }.apply {
@@ -567,8 +740,21 @@ class AndroidSystemController(private val context: Context) {
 
         return try {
             appContext.startActivity(intent)
-            "Вызов: $target"
+            if (resolved.isNotEmpty() && canDirectCall) {
+                "Прямой звонок: $target ($resolved)"
+            } else {
+                "Вызов: $target"
+            }
         } catch (_: Exception) {
+            try {
+                if (resolved.isNotEmpty()) {
+                    val dialFallback = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$resolved")).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    appContext.startActivity(dialFallback)
+                }
+            } catch (_: Exception) {
+            }
             "Подготовлен вызов: $target"
         }
     }
@@ -576,6 +762,18 @@ class AndroidSystemController(private val context: Context) {
     fun sendSmsToTarget(target: String, messageBody: String): String {
         val resolved = resolveContactPhone(target)
         val uriNumber = if (resolved.any { it.isDigit() }) resolved else ""
+
+        if (uriNumber.isNotEmpty() && messageBody.isNotBlank() && hasPermission(Manifest.permission.SEND_SMS)) {
+            try {
+                val smsManager = appContext.getSystemService(SmsManager::class.java)
+                if (smsManager != null) {
+                    smsManager.sendTextMessage(uriNumber, null, messageBody, null, null)
+                    return "SMS отправлено напрямую на $target ($uriNumber)"
+                }
+            } catch (_: Exception) {
+            }
+        }
+
         val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$uriNumber")).apply {
             putExtra("sms_body", messageBody)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
