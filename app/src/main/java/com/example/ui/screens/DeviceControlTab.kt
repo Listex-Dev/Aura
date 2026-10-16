@@ -2,7 +2,9 @@ package com.example.ui.screens
 
 import android.app.Activity
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,26 +18,40 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.AccessibilityNew
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BrightnessHigh
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.FlashlightOff
 import androidx.compose.material.icons.filled.FlashlightOn
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.SwipeDown
+import androidx.compose.material.icons.filled.SwipeUp
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -43,12 +59,14 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,6 +80,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.system.AndroidSystemController
+import com.example.system.AuraAccessibilityService
 import com.example.system.DeviceTelemetryState
 import kotlin.math.roundToInt
 
@@ -75,7 +94,13 @@ fun DeviceControlTab(
     val context = LocalContext.current
     val activity = context as? Activity
 
+    val isA11yConnected by AuraAccessibilityService.isConnected.collectAsState()
+    val lastA11yReport by AuraAccessibilityService.lastActionReport.collectAsState()
+    val a11yActive = isA11yConnected || telemetry.isAccessibilityEnabled
+
     var appSearchQuery by remember { mutableStateOf("") }
+    var targetAppName by remember { mutableStateOf("YouTube") }
+    var inAppActionPayload by remember { mutableStateOf("") }
     var contactTarget by remember { mutableStateOf("") }
     var smsText by remember { mutableStateOf("") }
     var alarmTimeInput by remember { mutableStateOf("07:30") }
@@ -101,24 +126,450 @@ fun DeviceControlTab(
         item {
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Аппаратный пульт Android",
+                text = "Полное управление Android",
                 style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.onBackground
             )
             Text(
-                text = "Прямое управление системными функциями, связью и приложениями",
+                text = "Специальные возможности (Accessibility), действия внутри любых приложений и аппаратный контроль",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
-        // Quick Hardware Tile Row: Flashlight, Battery, Wi-Fi, Bluetooth
+        // Accessibility Service Full Control Card
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        1.dp,
+                        if (a11yActive) {
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                        } else {
+                            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.5f)
+                        },
+                        RoundedCornerShape(24.dp)
+                    ),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (a11yActive) {
+                                            MaterialTheme.colorScheme.primaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.tertiaryContainer
+                                        }
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AccessibilityNew,
+                                    contentDescription = null,
+                                    tint = if (a11yActive) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.tertiary
+                                    }
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Специальные возможности Aura",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (a11yActive) {
+                                        "АКТИВНО • Полный доступ к экрану и жестам"
+                                    } else {
+                                        "Включите в настройках для нажатий и ввода в любых приложениях"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (a11yActive) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Button(
+                        onClick = {
+                            val msg = systemController.openAccessibilitySettings()
+                            onFeedbackSpoken(msg)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("open_accessibility_settings_button"),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (a11yActive) {
+                                MaterialTheme.colorScheme.secondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            },
+                            contentColor = if (a11yActive) {
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onPrimary
+                            }
+                        )
+                    ) {
+                        Icon(Icons.Default.AccessibilityNew, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (a11yActive) {
+                                "Настройки специальных возможностей (Включено)"
+                            } else {
+                                "Включить полное управление (Accessibility)"
+                            },
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Глобальные системные действия:",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        SystemPanelButton(
+                            icon = Icons.AutoMirrored.Filled.ArrowBack,
+                            label = "Назад",
+                            active = a11yActive,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                val res = systemController.executeGlobalAccessibilityAction("BACK")
+                                onFeedbackSpoken(res)
+                            }
+                        )
+                        SystemPanelButton(
+                            icon = Icons.Default.Home,
+                            label = "Домой",
+                            active = a11yActive,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                val res = systemController.executeGlobalAccessibilityAction("HOME")
+                                onFeedbackSpoken(res)
+                            }
+                        )
+                        SystemPanelButton(
+                            icon = Icons.Default.Notifications,
+                            label = "Шторка",
+                            active = a11yActive,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                val res = systemController.executeGlobalAccessibilityAction("NOTIFICATIONS")
+                                onFeedbackSpoken(res)
+                            }
+                        )
+                        SystemPanelButton(
+                            icon = Icons.Default.CameraAlt,
+                            label = "Скриншот",
+                            active = a11yActive,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                val res = systemController.executeGlobalAccessibilityAction("SCREENSHOT")
+                                onFeedbackSpoken(res)
+                            }
+                        )
+                        SystemPanelButton(
+                            icon = Icons.Default.Lock,
+                            label = "Экран",
+                            active = a11yActive,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                val res = systemController.executeGlobalAccessibilityAction("LOCK_SCREEN")
+                                onFeedbackSpoken(res)
+                            }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = lastA11yReport,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+            }
+        }
+
+        // Universal Cross-App Action Executor Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.TouchApp,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "Действия внутри любых приложений",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Поиск, нажатие кнопок, ввод текста, свайпы и чтение экрана",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("YouTube", "Telegram", "WhatsApp", "Google", "Карты", "Chrome").forEach { presetApp ->
+                            AssistChip(
+                                onClick = { targetAppName = presetApp },
+                                label = { Text(presetApp) }
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedTextField(
+                        value = targetAppName,
+                        onValueChange = { targetAppName = it },
+                        label = { Text("Целевое приложение") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("cross_app_target_input"),
+                        shape = RoundedCornerShape(14.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedTextField(
+                        value = inAppActionPayload,
+                        onValueChange = { inAppActionPayload = it },
+                        label = { Text("Текст для поиска, ввода или название кнопки") },
+                        placeholder = { Text("Например: Музыка для работы / Привет! / Подписаться") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("cross_app_payload_input"),
+                        shape = RoundedCornerShape(14.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                val res = systemController.searchInAppOrWeb(
+                                    targetAppName.ifBlank { "Google" },
+                                    inAppActionPayload.ifBlank { "Популярное" }
+                                )
+                                onFeedbackSpoken(res)
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("execute_in_app_search_button")
+                        ) {
+                            Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Выполнить в приложении")
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilledTonalButton(
+                            onClick = {
+                                if (targetAppName.isNotBlank()) {
+                                    systemController.openAppByQuery(targetAppName)
+                                }
+                                val res = systemController.clickUiElementInApp(
+                                    inAppActionPayload.ifBlank { "Поиск" },
+                                    delayMs = 1300L
+                                )
+                                onFeedbackSpoken(res)
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                                .testTag("click_in_app_button")
+                        ) {
+                            Text("Нажать кнопку")
+                        }
+                        FilledTonalButton(
+                            onClick = {
+                                if (targetAppName.isNotBlank()) {
+                                    systemController.openAppByQuery(targetAppName)
+                                }
+                                val res = systemController.inputTextInApp(
+                                    "",
+                                    inAppActionPayload.ifBlank { "Привет!" },
+                                    delayMs = 1400L
+                                )
+                                onFeedbackSpoken(res)
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                                .testTag("type_in_app_button")
+                        ) {
+                            Text("Ввести текст")
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val res = systemController.scrollInApp("DOWN")
+                                onFeedbackSpoken(res)
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.SwipeDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Скролл вниз")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                val res = systemController.scrollInApp("UP")
+                                onFeedbackSpoken(res)
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.SwipeUp, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Скролл вверх")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                val res = systemController.readCurrentScreenContent()
+                                onFeedbackSpoken(res)
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("read_screen_button")
+                        ) {
+                            Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Экран")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Media Playback Universal Controller
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Управление медиа и плеерами",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        FilledTonalButton(
+                            onClick = {
+                                val res = systemController.controlMediaPlayback("PREVIOUS")
+                                onFeedbackSpoken(res)
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.SkipPrevious, contentDescription = "Предыдущий")
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Пред.")
+                        }
+                        Button(
+                            onClick = {
+                                val res = systemController.controlMediaPlayback("PLAY_PAUSE")
+                                onFeedbackSpoken(res)
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = "Пуск / Пауза")
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Пуск / Пауза")
+                        }
+                        FilledTonalButton(
+                            onClick = {
+                                val res = systemController.controlMediaPlayback("NEXT")
+                                onFeedbackSpoken(res)
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.SkipNext, contentDescription = "Следующий")
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("След.")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Quick Hardware Tile Row: Flashlight & Battery
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Torch Tile
                 Card(
                     modifier = Modifier
                         .weight(1f)
@@ -170,7 +621,6 @@ fun DeviceControlTab(
                     }
                 }
 
-                // Telemetry & Battery Tile
                 Card(
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(22.dp),
@@ -488,7 +938,7 @@ fun DeviceControlTab(
                     OutlinedTextField(
                         value = appSearchQuery,
                         onValueChange = { appSearchQuery = it },
-                        placeholder = { Text("Поиск приложения для запуска...") },
+                        placeholder = { Text("Поиск любого приложения на телефоне...") },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                         singleLine = true,
                         modifier = Modifier
@@ -500,7 +950,7 @@ fun DeviceControlTab(
             }
         }
 
-        items(filteredApps.take(25), key = { it.packageName }) { appInfo ->
+        items(filteredApps.take(40), key = { it.packageName }) { appInfo ->
             Card(
                 modifier = Modifier
                     .fillMaxWidth()

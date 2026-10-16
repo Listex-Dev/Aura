@@ -175,6 +175,9 @@ fun MainAssistantScaffold(
     val liveTranscript by viewModel.liveTranscript.collectAsStateWithLifecycle()
     val rmsAmplitude by viewModel.rmsAmplitude.collectAsStateWithLifecycle()
     val isTtsEnabled by viewModel.isTtsEnabled.collectAsStateWithLifecycle()
+    val isContinuousMode by viewModel.voiceEngine.isContinuousMode.collectAsStateWithLifecycle()
+    val activePersona by viewModel.voiceEngine.persona.collectAsStateWithLifecycle()
+    val activeVoiceLabel by viewModel.voiceEngine.activeVoiceLabel.collectAsStateWithLifecycle()
     val voiceStatusMessage by viewModel.voiceStatusMessage.collectAsStateWithLifecycle()
     val lastExecution by viewModel.lastExecution.collectAsStateWithLifecycle()
     val smartItemsState by viewModel.smartItemsState.collectAsStateWithLifecycle()
@@ -401,7 +404,13 @@ fun MainAssistantScaffold(
                     onSubmitCommand = { query, activity ->
                         viewModel.executeVoiceOrTextCommand(query, activity)
                     },
-                    onDeleteLog = { logId -> viewModel.deleteHistoryLog(logId) }
+                    onDeleteLog = { logId -> viewModel.deleteHistoryLog(logId) },
+                    isContinuousMode = isContinuousMode,
+                    activePersona = activePersona,
+                    activeVoiceLabel = activeVoiceLabel,
+                    onToggleContinuousMode = { viewModel.voiceEngine.toggleContinuousMode() },
+                    onSelectPersona = { persona -> viewModel.voiceEngine.setVoicePersona(persona) },
+                    onCycleVoice = { viewModel.voiceEngine.cycleRussianVoice() }
                 )
 
                 1 -> DeviceControlTab(

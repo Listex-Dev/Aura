@@ -38,23 +38,29 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.FlashlightOn
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -78,20 +84,23 @@ import com.example.data.model.CommandLog
 import com.example.ui.LastExecutionCard
 import com.example.ui.UiState
 import com.example.voice.VoiceOrbMode
+import com.example.voice.VoicePersona
 import kotlin.math.cos
 import kotlin.math.sin
 
 private val QUICK_VOICE_COMMANDS = listOf(
+    "Открой YouTube и найди музыку для работы",
+    "Сделай скриншот экрана",
+    "Открой уведомления",
+    "Пролистай вниз",
+    "Что сейчас на экране?",
+    "Открой Телеграм и напиши Привет!",
     "Включи фонарик",
     "Выключи фонарик",
+    "Следующий трек",
     "Поставь будильник на 07:30",
     "Таймер на 5 минут",
-    "Громкость на 80%",
-    "Яркость экрана 90%",
-    "Открой настройки Wi-Fi",
-    "Добавь задачу купить кофе",
-    "Запиши заметку идеи для проекта",
-    "Позвони маме"
+    "Громкость на 80%"
 )
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -108,7 +117,13 @@ fun VoiceOrbTab(
     onToggleTts: () -> Unit,
     onReplaySpeech: (String) -> Unit,
     onSubmitCommand: (String, Activity?) -> Unit,
-    onDeleteLog: (String) -> Unit
+    onDeleteLog: (String) -> Unit,
+    isContinuousMode: Boolean = false,
+    activePersona: VoicePersona = VoicePersona.ALIVE_NATURAL,
+    activeVoiceLabel: String = "Neural RU HD",
+    onToggleContinuousMode: () -> Unit = {},
+    onSelectPersona: (VoicePersona) -> Unit = {},
+    onCycleVoice: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
@@ -168,10 +183,10 @@ fun VoiceOrbTab(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = when (orbMode) {
-                                        VoiceOrbMode.IDLE -> "ГОЛОСОВОЙ ПУЛЬТ ГОТОВ"
+                                        VoiceOrbMode.IDLE -> "ЖИВОЙ ГОЛОС ГОТОВ"
                                         VoiceOrbMode.LISTENING -> "СЛУШАЮ МИКРОФОН..."
-                                        VoiceOrbMode.THINKING -> "GEMINI ВЫПОЛНЯЕТ..."
-                                        VoiceOrbMode.SPEAKING -> "ОЗВУЧИВАНИЕ ОТВЕТА..."
+                                        VoiceOrbMode.THINKING -> "УПРАВЛЯЮ ПРИЛОЖЕНИЕМ..."
+                                        VoiceOrbMode.SPEAKING -> "ЖИВАЯ РЕЧЬ AURA..."
                                     },
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold
@@ -223,7 +238,7 @@ fun VoiceOrbTab(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Instant Voice Command Chips
+                    // Instant Cross-App & System Voice Command Chips
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -240,6 +255,7 @@ fun VoiceOrbTab(
                                             cmd.contains("фонарик") -> Icons.Default.FlashlightOn
                                             cmd.contains("будильник") || cmd.contains("Таймер") -> Icons.Default.Alarm
                                             cmd.contains("Позвони") -> Icons.Default.Phone
+                                            cmd.contains("YouTube") || cmd.contains("Телеграм") || cmd.contains("скриншот") -> Icons.Default.TouchApp
                                             else -> Icons.Default.Mic
                                         },
                                         contentDescription = null,
@@ -262,7 +278,7 @@ fun VoiceOrbTab(
                     OutlinedTextField(
                         value = textCommand,
                         onValueChange = { textCommand = it },
-                        placeholder = { Text("Скажите или введите команду для Android...") },
+                        placeholder = { Text("Например: Открой YouTube и найди музыку / Нажми Поиск...") },
                         singleLine = true,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -299,6 +315,82 @@ fun VoiceOrbTab(
                             }
                         }
                     )
+                }
+            }
+        }
+
+        // Live Voice & Continuous Conversation Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.RecordVoiceOver,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "Живой голос и режим диалога",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Движок: $activeVoiceLabel • Авто-слушание после ответа",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = isContinuousMode,
+                            onCheckedChange = { onToggleContinuousMode() },
+                            modifier = Modifier.testTag("continuous_dialog_switch")
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        VoicePersona.entries.forEach { persona ->
+                            FilterChip(
+                                selected = activePersona == persona,
+                                onClick = { onSelectPersona(persona) },
+                                label = { Text(persona.title) },
+                                leadingIcon = if (activePersona == persona) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.AutoAwesome,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                } else null
+                            )
+                        }
+                        FilledTonalButton(
+                            onClick = onCycleVoice,
+                            modifier = Modifier.testTag("cycle_voice_button")
+                        ) {
+                            Text("Сменить тембр")
+                        }
+                    }
                 }
             }
         }
@@ -380,7 +472,7 @@ fun VoiceOrbTab(
         // Cloud Synced Command History
         item {
             Text(
-                text = "Журнал голосовых команд (Облако)",
+                text = "Журнал голосовых команд",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier.padding(top = 4.dp)

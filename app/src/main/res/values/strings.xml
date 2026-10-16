@@ -6,4 +6,6 @@
     <string name="tab_device">Устройство</string>
     <string name="tab_organizer">Органайзер</string>
     <string name="tab_routines">Сценарии</string>
+    <string name="accessibility_service_label">Aura Control — Полное управление Android</string>
+    <string name="accessibility_service_description">Позволяет голосовому ИИ-ассистенту Aura выполнять нажатия, ввод текста, прокрутку, свайпы, скриншоты и любые действия внутри любых приложений по вашей голосовой команде.</string>
 </resources>

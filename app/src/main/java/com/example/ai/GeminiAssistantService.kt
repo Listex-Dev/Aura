@@ -1,11 +1,13 @@
 package com.example.ai
 
 import com.example.BuildConfig
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -17,7 +19,6 @@ import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.POST
 import retrofit2.http.Query
-import java.util.concurrent.TimeUnit
 
 @Serializable
 data class GenerateContentRequest(
@@ -121,11 +122,17 @@ class GeminiAssistantService(private val appContext: android.content.Context? = 
         putJsonObject("properties") {
             putJsonObject("spokenResponse") {
                 put("type", "STRING")
-                put("description", "Natural, concise Russian spoken response to be read aloud via TTS.")
+                put(
+                    "description",
+                    "Warm, lively, human-like Russian spoken response (1-2 natural conversational sentences) to be spoken aloud."
+                )
             }
             putJsonObject("actions") {
                 put("type", "ARRAY")
-                put("description", "Ordered list of Android system actions to execute immediately.")
+                put(
+                    "description",
+                    "Ordered sequence of Android system and in-app Accessibility actions to execute."
+                )
                 putJsonObject("items") {
                     put("type", "OBJECT")
                     putJsonObject("properties") {
@@ -133,35 +140,35 @@ class GeminiAssistantService(private val appContext: android.content.Context? = 
                             put("type", "STRING")
                             put(
                                 "description",
-                                "One of: TORCH_ON, TORCH_OFF, SET_VOLUME, SET_BRIGHTNESS, SET_ALARM, SET_TIMER, OPEN_APP, CALL_CONTACT, SEND_SMS, OPEN_SETTINGS, CREATE_NOTE, CREATE_TASK, CREATE_REMINDER, RUN_ROUTINE, NONE"
+                                "One of: TORCH_ON, TORCH_OFF, SET_VOLUME, SET_BRIGHTNESS, SET_ALARM, SET_TIMER, OPEN_APP, SEARCH_IN_APP, CLICK_UI, INPUT_TEXT, SCROLL_SCREEN, TAP_SCREEN, GLOBAL_ACTION, READ_SCREEN, MEDIA_CONTROL, CALL_CONTACT, SEND_SMS, OPEN_SETTINGS, CREATE_NOTE, CREATE_TASK, CREATE_REMINDER, RUN_ROUTINE, NONE"
                             )
                         }
                         putJsonObject("target") {
                             put("type", "STRING")
                             put(
                                 "description",
-                                "Target app name, contact name or phone number, settings panel (WIFI, BLUETOOTH, SOUND, DISPLAY, LOCATION, GENERAL), or note/task/routine title."
+                                "Target app name, UI button text to click, input field hint, scroll direction (DOWN/UP/LEFT/RIGHT), global action (BACK/HOME/RECENTS/NOTIFICATIONS/QUICK_SETTINGS/LOCK_SCREEN/SCREENSHOT/SPLIT_SCREEN), media command (PLAY_PAUSE/NEXT/PREVIOUS), settings section, or note/task title."
                             )
                         }
                         putJsonObject("value") {
                             put("type", "STRING")
                             put(
                                 "description",
-                                "Action parameter: volume/brightness 0-100, alarm HH:MM, timer seconds, SMS message text, or note/task description."
+                                "Action parameter: search query, text to type into app field, volume/brightness 0-100, alarm HH:MM, timer seconds, coordinates '50,50', or SMS/note text."
                             )
                         }
                     }
                     putJsonArray("required") {
-                        add(kotlinx.serialization.json.JsonPrimitive("actionType"))
-                        add(kotlinx.serialization.json.JsonPrimitive("target"))
-                        add(kotlinx.serialization.json.JsonPrimitive("value"))
+                        add(JsonPrimitive("actionType"))
+                        add(JsonPrimitive("target"))
+                        add(JsonPrimitive("value"))
                     }
                 }
             }
         }
         putJsonArray("required") {
-            add(kotlinx.serialization.json.JsonPrimitive("spokenResponse"))
-            add(kotlinx.serialization.json.JsonPrimitive("actions"))
+            add(JsonPrimitive("spokenResponse"))
+            add(JsonPrimitive("actions"))
         }
     }
 
@@ -183,27 +190,34 @@ class GeminiAssistantService(private val appContext: android.content.Context? = 
         }
 
         val systemPrompt = """
-            Ты — голосовой ИИ-ассистент Aura Control для управления смартфоном Android.
-            Отвечай ВСЕГДА на русском языке, кратко, дружелюбно и естественно для озвучивания голосом (1-2 предложения в поле spokenResponse).
-            Проанализируй запрос пользователя и сформируй список системных действий в массиве actions:
-            - TORCH_ON / TORCH_OFF: включить или выключить фонарик.
-            - SET_VOLUME: изменить громкость (target: "MEDIA", "RING" или "ALARM", value: число от "0" до "100").
-            - SET_BRIGHTNESS: изменить яркость экрана (target: "SCREEN", value: число от "10" до "100").
-            - SET_ALARM: поставить будильник (target: название будильника, value: время в формате "HH:MM", например "07:30").
-            - SET_TIMER: поставить таймер (target: название таймера, value: длительность в секундах, например "300" для 5 минут).
-            - OPEN_APP: открыть приложение (target: точное название приложения из списка установленных или его часть).
-            - CALL_CONTACT: позвонить контакту или по номеру (target: имя контакта или номер телефона).
-            - SEND_SMS: отправить сообщение (target: имя контакта или номер телефона, value: текст сообщения).
-            - OPEN_SETTINGS: открыть системные настройки (target: "WIFI", "BLUETOOTH", "SOUND", "DISPLAY", "LOCATION", "GENERAL").
-            - CREATE_NOTE: сохранить заметку в облако (target: заголовок, value: текст заметки).
-            - CREATE_TASK: добавить задачу в чек-лист (target: название задачи, value: детали задачи).
-            - CREATE_REMINDER: добавить напоминание (target: текст напоминания, value: время или дата).
-            - RUN_ROUTINE: запустить пользовательский сценарий (target: название сценария).
-            - NONE: если пользователь просто задал вопрос или общается без системного действия.
+            Ты — Аура (Aura Control), живой, эмоциональный и умный голосовой ИИ-ассистент с полным управлением Android через AccessibilityService.
+            Твой голос звучит тепло, живо и естественно, как у настоящего человека-помощника (без канцеляризмов и роботизированных фраз).
+            В поле spokenResponse пиши живой разговорный ответ на русском языке (1-2 коротких предложения с естественной интонацией).
             
-            Текущее состояние устройства: $deviceContextSummary
-            Доступные приложения: ${installedAppNames.take(35).joinToString(", ")}
-            Доступные сценарии: ${routineNames.joinToString(", ")}
+            Ты можешь выполнять ЛЮБЫЕ действия в любых приложениях и в системе Android, комбинируя шаги в массиве actions:
+            1. OPEN_APP — запустить любое приложение (target: название приложения).
+            2. SEARCH_IN_APP — найти или открыть что-то внутри приложения или браузера (target: "YouTube", "Telegram", "WhatsApp", "Maps", "Google" или имя приложения; value: поисковый запрос или сообщение).
+            3. CLICK_UI — нажать на любую кнопку, вкладку или элемент на экране по тексту/описанию через Специальные возможности (target: текст кнопки/элемента, например "Поиск", "Отправить", "Лайк", "Подписаться").
+            4. INPUT_TEXT — ввести текст в поле ввода любого открытого приложения и отправить (target: подсказка поля или пусто "", value: текст для ввода).
+            5. SCROLL_SCREEN — прокрутить или свайпнуть экран в любом приложении (target: "DOWN", "UP", "LEFT", "RIGHT").
+            6. TAP_SCREEN — коснуться экрана по координатам в процентах (target: "50,50", value: "").
+            7. GLOBAL_ACTION — выполнить глобальное системное действие Android (target: "BACK", "HOME", "RECENTS", "NOTIFICATIONS", "QUICK_SETTINGS", "LOCK_SCREEN", "SCREENSHOT", "SPLIT_SCREEN").
+            8. READ_SCREEN — прочитать вслух содержимое текущего экрана (target: "SCREEN", value: "").
+            9. MEDIA_CONTROL — управление музыкой/видео в любом плеере (target: "PLAY_PAUSE", "NEXT", "PREVIOUS", "PLAY", "PAUSE").
+            10. TORCH_ON / TORCH_OFF — включить/выключить фонарик.
+            11. SET_VOLUME — изменить громкость (target: "MEDIA", "RING", "ALARM"; value: "0".."100").
+            12. SET_BRIGHTNESS — изменить яркость (target: "SCREEN", value: "10".."100").
+            13. SET_ALARM — будильник (target: название, value: "HH:MM").
+            14. SET_TIMER — таймер (target: название, value: секунды).
+            15. CALL_CONTACT / SEND_SMS — звонок или SMS.
+            16. OPEN_SETTINGS — открыть настройки ("ACCESSIBILITY", "WIFI", "BLUETOOTH", "SOUND", "DISPLAY", "LOCATION", "GENERAL").
+            17. CREATE_NOTE / CREATE_TASK / CREATE_REMINDER / RUN_ROUTINE.
+            
+            Если пользователь просит составное действие (например: "Открой YouTube и включи музыку для работы" или "Открой Телеграм и напиши привет"), возвращай последовательность действий в массиве actions!
+            
+            Состояние смартфона: $deviceContextSummary
+            Установленные приложения: ${installedAppNames.take(45).joinToString(", ")}
+            Сценарии: ${routineNames.joinToString(", ")}
         """.trimIndent()
 
         val request = GenerateContentRequest(
@@ -212,7 +226,7 @@ class GeminiAssistantService(private val appContext: android.content.Context? = 
             generationConfig = GenerationConfig(
                 responseMimeType = "application/json",
                 responseSchema = responseSchema,
-                temperature = 0.2f
+                temperature = 0.35f
             )
         )
 
@@ -224,7 +238,7 @@ class GeminiAssistantService(private val appContext: android.content.Context? = 
             } else {
                 parseCommandLocally(userQuery)
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             parseCommandLocally(userQuery)
         }
     }
@@ -234,18 +248,143 @@ class GeminiAssistantService(private val appContext: android.content.Context? = 
         val actions = mutableListOf<AndroidActionCommand>()
         val replies = mutableListOf<String>()
 
-        // 1. Torch / Flashlight
-        if (lower.contains("фонар") || lower.contains("свет") || lower.contains("вспышк")) {
-            if (lower.contains("выкл") || lower.contains("погас") || lower.contains("откл")) {
-                actions.add(AndroidActionCommand("TORCH_OFF", "FLASHLIGHT", "OFF"))
-                replies.add("Выключаю фонарик")
-            } else {
-                actions.add(AndroidActionCommand("TORCH_ON", "FLASHLIGHT", "ON"))
-                replies.add("Включаю фонарик")
+        // 1. Global System & Accessibility Actions (Screenshot, Home, Back, Notifications, Lock, Recents)
+        when {
+            lower.contains("скриншот") || lower.contains("снимок экрана") -> {
+                actions.add(AndroidActionCommand("GLOBAL_ACTION", "SCREENSHOT", ""))
+                replies.add("Секунду, делаю скриншот экрана!")
+            }
+            lower.contains("заблокир") || lower.contains("выключи экран") -> {
+                actions.add(AndroidActionCommand("GLOBAL_ACTION", "LOCK_SCREEN", ""))
+                replies.add("Блокирую экран телефона")
+            }
+            lower.contains("уведомлен") || lower.contains("шторк") -> {
+                actions.add(AndroidActionCommand("GLOBAL_ACTION", "NOTIFICATIONS", ""))
+                replies.add("Открываю панель уведомлений")
+            }
+            lower.contains("быстрые настройк") -> {
+                actions.add(AndroidActionCommand("GLOBAL_ACTION", "QUICK_SETTINGS", ""))
+                replies.add("Открываю быстрые настройки системы")
+            }
+            lower.contains("домой") || lower.contains("главный экран") || lower.contains("рабочий стол") -> {
+                actions.add(AndroidActionCommand("GLOBAL_ACTION", "HOME", ""))
+                replies.add("Возвращаюсь на главный экран")
+            }
+            lower == "назад" || lower.contains("вернись назад") || lower.contains("шаг назад") -> {
+                actions.add(AndroidActionCommand("GLOBAL_ACTION", "BACK", ""))
+                replies.add("Возвращаюсь назад")
+            }
+            lower.contains("недавн") || lower.contains("открытые приложен") -> {
+                actions.add(AndroidActionCommand("GLOBAL_ACTION", "RECENTS", ""))
+                replies.add("Показываю список недавних приложений")
+            }
+            lower.contains("раздели экран") -> {
+                actions.add(AndroidActionCommand("GLOBAL_ACTION", "SPLIT_SCREEN", ""))
+                replies.add("Переключаю режим разделения экрана")
             }
         }
 
-        // 2. Volume
+        // 2. Screen Reading
+        if (lower.contains("что на экране") || lower.contains("прочитай экран")) {
+            actions.add(AndroidActionCommand("READ_SCREEN", "SCREEN", ""))
+            replies.add("Считываю элементы текущего экрана")
+        }
+
+        // 3. Scroll / Swipe inside apps
+        if (lower.contains("пролист") || lower.contains("скролл") || lower.contains("прокрут") || lower.contains("свайп")) {
+            val dir = when {
+                lower.contains("вверх") || lower.contains("наверх") -> "UP"
+                lower.contains("влево") -> "LEFT"
+                lower.contains("вправо") -> "RIGHT"
+                else -> "DOWN"
+            }
+            actions.add(AndroidActionCommand("SCROLL_SCREEN", dir, ""))
+            replies.add("Прокручиваю экран")
+        }
+
+        // 4. Click UI Element by voice ("нажми ...", "кликни ...")
+        if (lower.startsWith("нажми ") || lower.startsWith("кликни ") || lower.contains("нажми на ")) {
+            val buttonTarget = query
+                .replace(Regex("(?i)^(нажми на кнопку|нажми на|нажми кнопку|нажми|кликни на|кликни)\\s*"), "")
+                .trim()
+            if (buttonTarget.isNotEmpty()) {
+                actions.add(AndroidActionCommand("CLICK_UI", buttonTarget, ""))
+                replies.add("Нажимаю на «$buttonTarget»")
+            }
+        }
+
+        // 5. Type text into app ("введи текст ...", "напечатай ...")
+        if (lower.startsWith("введи ") || lower.startsWith("напечатай ")) {
+            val textVal = query
+                .replace(Regex("(?i)^(введи текст|введи|напечатай текст|напечатай)\\s*"), "")
+                .trim()
+            if (textVal.isNotEmpty()) {
+                actions.add(AndroidActionCommand("INPUT_TEXT", "", textVal))
+                replies.add("Ввожу текст «$textVal» и отправляю")
+            }
+        }
+
+        // 6. Media playback control
+        if (lower.contains("пауз") || lower.contains("останови музыку") || lower.contains("останови видео")) {
+            actions.add(AndroidActionCommand("MEDIA_CONTROL", "PAUSE", ""))
+            replies.add("Ставлю воспроизведение на паузу")
+        } else if (lower.contains("следующ") && (lower.contains("трек") || lower.contains("песн") || lower.contains("видео"))) {
+            actions.add(AndroidActionCommand("MEDIA_CONTROL", "NEXT", ""))
+            replies.add("Включаю следующий трек!")
+        } else if (lower.contains("предыдущ") && (lower.contains("трек") || lower.contains("песн"))) {
+            actions.add(AndroidActionCommand("MEDIA_CONTROL", "PREVIOUS", ""))
+            replies.add("Возвращаю предыдущий трек")
+        } else if (lower.contains("продолжи воспроизведен") || lower.contains("включи плеер")) {
+            actions.add(AndroidActionCommand("MEDIA_CONTROL", "PLAY", ""))
+            replies.add("Продолжаю воспроизведение")
+        }
+
+        // 7. Cross-App Search & In-App Actions (YouTube, Telegram, WhatsApp, Google, Maps)
+        if (lower.contains("ютуб") || lower.contains("youtube")) {
+            val searchPart = query
+                .replace(Regex("(?i)(открой|запусти|включи|найди|на|в|ютубе|ютуб|youtube|и|поищи|видео)"), "")
+                .trim()
+            if (searchPart.isNotEmpty()) {
+                actions.add(AndroidActionCommand("SEARCH_IN_APP", "YouTube", searchPart))
+                replies.add("С удовольствием! Открываю YouTube и ищу «$searchPart»")
+            } else {
+                actions.add(AndroidActionCommand("OPEN_APP", "YouTube", ""))
+                replies.add("Запускаю YouTube!")
+            }
+        } else if ((lower.contains("телеграм") || lower.contains("telegram")) && (lower.contains("напиши") || lower.contains("отправь"))) {
+            val msgPart = query
+                .replace(Regex("(?i)(открой|в|телеграм|телеграме|telegram|и|напиши|отправь|сообщение)"), "")
+                .trim()
+            actions.add(AndroidActionCommand("SEARCH_IN_APP", "Telegram", msgPart.ifBlank { "Привет!" }))
+            replies.add("Открываю Telegram и отправляю сообщение!")
+        } else if ((lower.contains("ватсап") || lower.contains("whatsapp")) && (lower.contains("напиши") || lower.contains("отправь"))) {
+            val msgPart = query
+                .replace(Regex("(?i)(открой|в|ватсап|ватсапе|whatsapp|и|напиши|отправь|сообщение)"), "")
+                .trim()
+            actions.add(AndroidActionCommand("SEARCH_IN_APP", "WhatsApp", msgPart.ifBlank { "Привет!" }))
+            replies.add("Перехожу в WhatsApp с вашим сообщением!")
+        } else if (lower.startsWith("найди ") || lower.startsWith("поищи ") || lower.contains("загугли")) {
+            val searchQ = query
+                .replace(Regex("(?i)^(найди в интернете|найди в гугле|загугли|найди|поищи)\\s*"), "")
+                .trim()
+            if (searchQ.isNotEmpty()) {
+                actions.add(AndroidActionCommand("SEARCH_IN_APP", "Google", searchQ))
+                replies.add("Ищу для вас «$searchQ»!")
+            }
+        }
+
+        // 8. Torch / Flashlight
+        if (lower.contains("фонар") || lower.contains("вспышк")) {
+            if (lower.contains("выкл") || lower.contains("погас") || lower.contains("откл")) {
+                actions.add(AndroidActionCommand("TORCH_OFF", "FLASHLIGHT", "OFF"))
+                replies.add("Готово, выключаю фонарик")
+            } else {
+                actions.add(AndroidActionCommand("TORCH_ON", "FLASHLIGHT", "ON"))
+                replies.add("Конечно, включаю фонарик!")
+            }
+        }
+
+        // 9. Volume
         if (lower.contains("громк") || lower.contains("звук")) {
             val numberMatch = Regex("(\\d{1,3})").find(lower)
             val level = numberMatch?.groupValues?.get(1)?.toIntOrNull()?.coerceIn(0, 100)
@@ -257,10 +396,10 @@ class GeminiAssistantService(private val appContext: android.content.Context? = 
                 }
             val stream = if (lower.contains("звон")) "RING" else if (lower.contains("будильн")) "ALARM" else "MEDIA"
             actions.add(AndroidActionCommand("SET_VOLUME", stream, level.toString()))
-            replies.add("Устанавливаю громкость на $level процентов")
+            replies.add("Ставлю громкость на $level процентов")
         }
 
-        // 3. Brightness
+        // 10. Brightness
         if (lower.contains("яркост") || lower.contains("экран ярч") || lower.contains("тускл")) {
             val numberMatch = Regex("(\\d{1,3})").find(lower)
             val level = numberMatch?.groupValues?.get(1)?.toIntOrNull()?.coerceIn(10, 100)
@@ -269,7 +408,7 @@ class GeminiAssistantService(private val appContext: android.content.Context? = 
             replies.add("Меняю яркость экрана на $level процентов")
         }
 
-        // 4. Alarm
+        // 11. Alarm
         if (lower.contains("будильн") || lower.contains("разбуд")) {
             val timeMatch = Regex("(\\d{1,2})[:.\\s](\\d{2})").find(lower)
             val hourOnlyMatch = Regex("на\\s+(\\d{1,2})\\s*(час|утр|вечер)?").find(lower)
@@ -286,38 +425,41 @@ class GeminiAssistantService(private val appContext: android.content.Context? = 
                 else -> "07:30"
             }
             actions.add(AndroidActionCommand("SET_ALARM", "Aura Alarm", timeStr))
-            replies.add("Ставлю будильник на $timeStr")
+            replies.add("Поставила будильник на $timeStr!")
         }
 
-        // 5. Timer
+        // 12. Timer
         if (lower.contains("таймер") || lower.contains("засеки")) {
             val numMatch = Regex("(\\d+)").find(lower)
             val amount = numMatch?.groupValues?.get(1)?.toIntOrNull() ?: 5
             val seconds = if (lower.contains("сек")) amount else if (lower.contains("час")) amount * 3600 else amount * 60
             actions.add(AndroidActionCommand("SET_TIMER", "Aura Timer", seconds.toString()))
-            replies.add("Запускаю таймер на $amount ${if (lower.contains("сек")) "секунд" else "минут"}")
+            replies.add("Засекаю таймер на $amount ${if (lower.contains("сек")) "секунд" else "минут"}!")
         }
 
-        // 6. Calls
+        // 13. Calls
         if (lower.contains("позвон") || lower.contains("набери")) {
             val target = query.replace(Regex("(?i)(позвони|позвонить|набери|набрать|контакту|по номеру)"), "").trim()
                 .ifBlank { "Голосовой вызов" }
             actions.add(AndroidActionCommand("CALL_CONTACT", target, ""))
-            replies.add("Набираю $target")
+            replies.add("Сейчас наберу $target")
         }
 
-        // 7. SMS
-        if (lower.contains("смс") || lower.contains("сообщен") || lower.contains("напиши")) {
+        // 14. SMS
+        if (lower.contains("смс") || (lower.contains("сообщен") && !lower.contains("телеграм") && !lower.contains("ватсап"))) {
             val cleaned = query.replace(Regex("(?i)(отправь|напиши|смс|сообщение)"), "").trim()
             val parts = cleaned.split(" ", limit = 2)
             val recipient = parts.firstOrNull()?.ifBlank { "Контакт" } ?: "Контакт"
             val body = parts.getOrNull(1) ?: "Привет! Я скоро перезвоню."
             actions.add(AndroidActionCommand("SEND_SMS", recipient, body))
-            replies.add("Открываю отправку сообщения для $recipient")
+            replies.add("Подготовила сообщение для $recipient")
         }
 
-        // 8. Settings
-        if (lower.contains("настройк") || lower.contains("вайфай") || lower.contains("wi-fi") || lower.contains("блютуз") || lower.contains("bluetooth")) {
+        // 15. Settings & Accessibility
+        if (lower.contains("специальн") && lower.contains("возможност")) {
+            actions.add(AndroidActionCommand("OPEN_SETTINGS", "ACCESSIBILITY", ""))
+            replies.add("Открываю настройки специальных возможностей. Включите там сервис Aura Control для полного управления телефоном!")
+        } else if (lower.contains("настройк") || lower.contains("вайфай") || lower.contains("wi-fi") || lower.contains("блютуз") || lower.contains("bluetooth")) {
             val panel = when {
                 lower.contains("вайфай") || lower.contains("wi-fi") || lower.contains("интернет") || lower.contains("сет") -> "WIFI"
                 lower.contains("блютуз") || lower.contains("bluetooth") -> "BLUETOOTH"
@@ -327,39 +469,66 @@ class GeminiAssistantService(private val appContext: android.content.Context? = 
                 else -> "GENERAL"
             }
             actions.add(AndroidActionCommand("OPEN_SETTINGS", panel, ""))
-            replies.add("Открываю панель настроек $panel")
+            replies.add("Открываю системные настройки $panel")
         }
 
-        // 9. Tasks / Notes / Reminders
-        if (lower.contains("задач") || lower.contains("купить") || lower.contains("сделать") || lower.contains("список дел")) {
+        // 16. Tasks / Notes / Reminders
+        if (lower.contains("задач") || lower.contains("купить") || lower.contains("список дел")) {
             val taskTitle = query.replace(Regex("(?i)(добавь|создай|задачу|в список дел|нужно)"), "").trim()
                 .ifBlank { query }
             actions.add(AndroidActionCommand("CREATE_TASK", taskTitle, "Создано голосовой командой"))
-            replies.add("Задача «$taskTitle» добавлена в органайзер")
+            replies.add("Записала задачу «$taskTitle» в ваш список дел!")
         } else if (lower.contains("заметк") || lower.contains("запиши")) {
             val noteText = query.replace(Regex("(?i)(создай|добавь|заметку|запиши)"), "").trim()
                 .ifBlank { query }
             actions.add(AndroidActionCommand("CREATE_NOTE", noteText.take(40), noteText))
-            replies.add("Заметка сохранена в облаке")
+            replies.add("Сохранила вашу заметку!")
         } else if (lower.contains("напомн")) {
             val remText = query.replace(Regex("(?i)(напомни|создай напоминание)"), "").trim()
                 .ifBlank { query }
             actions.add(AndroidActionCommand("CREATE_REMINDER", remText, "Сегодня"))
-            replies.add("Напоминание «$remText» сохранено")
+            replies.add("Обязательно напомню: «$remText»")
         }
 
-        // 10. Open App
-        if ((lower.contains("открой") || lower.contains("запусти")) && !lower.contains("настройк")) {
-            val appTarget = query.replace(Regex("(?i)(открой|запусти|приложение)"), "").trim()
-            if (appTarget.isNotEmpty()) {
-                actions.add(AndroidActionCommand("OPEN_APP", appTarget, ""))
-                replies.add("Запускаю $appTarget")
+        // 17. Open Any App (with optional follow-up action after " и ")
+        if ((lower.contains("открой") || lower.contains("запусти")) &&
+            !lower.contains("настройк") &&
+            !lower.contains("уведомлен") &&
+            actions.isEmpty()
+        ) {
+            val rawTarget = query.replace(Regex("(?i)^(открой|запусти|приложение)\\s*"), "").trim()
+            if (rawTarget.contains(" и ")) {
+                val split = rawTarget.split(" и ", limit = 2)
+                val appPart = split[0].trim()
+                val secondPart = split[1].trim()
+                actions.add(AndroidActionCommand("OPEN_APP", appPart, ""))
+                when {
+                    secondPart.startsWith("нажми ") -> {
+                        val btn = secondPart.removePrefix("нажми ").trim()
+                        actions.add(AndroidActionCommand("CLICK_UI", btn, "DELAY"))
+                    }
+                    secondPart.startsWith("напиши ") || secondPart.startsWith("введи ") -> {
+                        val txt = secondPart.replace(Regex("^(напиши|введи)\\s*"), "").trim()
+                        actions.add(AndroidActionCommand("INPUT_TEXT", "", txt))
+                    }
+                    secondPart.startsWith("найди ") -> {
+                        val q = secondPart.removePrefix("найди ").trim()
+                        actions.add(AndroidActionCommand("SEARCH_IN_APP", appPart, q))
+                    }
+                    secondPart.contains("пролист") || secondPart.contains("скролл") -> {
+                        actions.add(AndroidActionCommand("SCROLL_SCREEN", "DOWN", "DELAY"))
+                    }
+                }
+                replies.add("Открываю $appPart и выполняю действие!")
+            } else if (rawTarget.isNotEmpty()) {
+                actions.add(AndroidActionCommand("OPEN_APP", rawTarget, ""))
+                replies.add("С радостью! Запускаю $rawTarget.")
             }
         }
 
         if (actions.isEmpty()) {
             return AssistantPlanResponse(
-                spokenResponse = "Я готов управлять вашим Android: скажите, например, «включи фонарик», «поставь будильник на 7:30», «громкость 80%» или «добавь задачу».",
+                spokenResponse = "Я вас слушаю! Скажите, какое приложение открыть, что нажать на экране, какой текст ввести или какую функцию телефона переключить.",
                 actions = emptyList()
             )
         }

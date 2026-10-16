@@ -136,8 +136,12 @@ class AssistantViewModel(
             )
 
             val executedBadges = mutableListOf<String>()
+            var launchedAppInChain = false
             for (action in plan.actions) {
-                val badge = executeSingleAndroidAction(action, activity)
+                if (action.actionType.equals("OPEN_APP", ignoreCase = true)) {
+                    launchedAppInChain = true
+                }
+                val badge = executeSingleAndroidAction(action, activity, delayForCrossApp = launchedAppInChain)
                 if (badge.isNotBlank()) {
                     executedBadges.add(badge)
                 }
@@ -145,16 +149,16 @@ class AssistantViewModel(
 
             val spoken = plan.spokenResponse.ifBlank {
                 if (executedBadges.isNotEmpty()) {
-                    "Выполнено: ${executedBadges.joinToString(", ")}"
+                    "Готово! ${executedBadges.joinToString(", ")}"
                 } else {
-                    "Команда обработана"
+                    "Команда выполнена!"
                 }
             }
 
             _lastExecution.value = LastExecutionCard(
                 userQuery = cleanQuery,
                 assistantReply = spoken,
-                actionBadges = executedBadges.ifEmpty { listOf("ОТВЕТ АССИСТЕНТА") }
+                actionBadges = executedBadges.ifEmpty { listOf("ЖИВОЙ ОТВЕТ AURA") }
             )
 
             voiceEngine.speak(spoken)
@@ -168,8 +172,10 @@ class AssistantViewModel(
 
     private suspend fun executeSingleAndroidAction(
         action: AndroidActionCommand,
-        activity: Activity?
+        activity: Activity?,
+        delayForCrossApp: Boolean = false
     ): String {
+        val crossAppDelay = if (delayForCrossApp) 1500L else 0L
         return when (action.actionType.uppercase()) {
             "TORCH_ON" -> systemController.setTorch(true)
             "TORCH_OFF" -> systemController.setTorch(false)
@@ -190,6 +196,46 @@ class AssistantViewModel(
             }
             "OPEN_APP" -> {
                 systemController.openAppByQuery(action.target.ifBlank { action.value })
+            }
+            "SEARCH_IN_APP" -> {
+                systemController.searchInAppOrWeb(
+                    appNameOrTarget = action.target.ifBlank { "Google" },
+                    searchQuery = action.value.ifBlank { action.target }
+                )
+            }
+            "CLICK_UI" -> {
+                systemController.clickUiElementInApp(
+                    targetText = action.target.ifBlank { action.value },
+                    delayMs = crossAppDelay
+                )
+            }
+            "INPUT_TEXT" -> {
+                systemController.inputTextInApp(
+                    fieldHint = action.target,
+                    textToType = action.value.ifBlank { action.target },
+                    delayMs = crossAppDelay
+                )
+            }
+            "SCROLL_SCREEN" -> {
+                systemController.scrollInApp(
+                    direction = action.target.ifBlank { "DOWN" },
+                    delayMs = crossAppDelay
+                )
+            }
+            "TAP_SCREEN" -> {
+                val coords = (action.target.ifBlank { action.value }).split(",")
+                val x = coords.getOrNull(0)?.trim()?.toFloatOrNull() ?: 50f
+                val y = coords.getOrNull(1)?.trim()?.toFloatOrNull() ?: 50f
+                systemController.tapScreenPercent(x, y, delayMs = crossAppDelay)
+            }
+            "GLOBAL_ACTION" -> {
+                systemController.executeGlobalAccessibilityAction(action.target.ifBlank { action.value })
+            }
+            "READ_SCREEN" -> {
+                systemController.readCurrentScreenContent()
+            }
+            "MEDIA_CONTROL" -> {
+                systemController.controlMediaPlayback(action.target.ifBlank { action.value })
             }
             "CALL_CONTACT" -> {
                 systemController.callContactOrNumber(action.target.ifBlank { action.value })
@@ -257,6 +303,11 @@ class AssistantViewModel(
                     "ALARM" -> badges.add(systemController.setAlarm(routine.title, param.ifBlank { "07:30" }))
                     "TIMER" -> badges.add(systemController.setTimer(routine.title, param.toIntOrNull() ?: 600))
                     "SETTINGS" -> badges.add(systemController.openSystemSettings(param))
+                    "OPEN_APP" -> badges.add(systemController.openAppByQuery(param))
+                    "CLICK" -> badges.add(systemController.clickUiElementInApp(param, delayMs = 1200L))
+                    "INPUT" -> badges.add(systemController.inputTextInApp("", param, delayMs = 1200L))
+                    "SCROLL" -> badges.add(systemController.scrollInApp(param.ifBlank { "DOWN" }, delayMs = 800L))
+                    "GLOBAL" -> badges.add(systemController.executeGlobalAccessibilityAction(param))
                     "TASK" -> {
                         repository.createSmartItem(param.ifBlank { routine.title }, "Создано макросом", "TASK")
                         badges.add("Задача: $param")

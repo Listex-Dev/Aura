@@ -1,8 +1,9 @@
 package com.example.system
 
-import android.Manifest
 import android.app.Activity
+import android.app.SearchManager
 import android.bluetooth.BluetoothManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -16,10 +17,12 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.AlarmClock
 import android.provider.ContactsContract
+import android.provider.MediaStore
 import android.provider.Settings
-import androidx.core.content.ContextCompat
+import android.view.KeyEvent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,6 +44,7 @@ data class DeviceTelemetryState(
     val isCharging: Boolean = false,
     val isWifiConnected: Boolean = false,
     val isBluetoothEnabled: Boolean = false,
+    val isAccessibilityEnabled: Boolean = false,
     val installedApps: List<InstalledAppInfo> = emptyList()
 )
 
@@ -91,6 +95,34 @@ class AndroidSystemController(private val context: Context) {
         }
     }
 
+    fun isAccessibilityServiceEnabled(): Boolean {
+        if (AuraAccessibilityService.isConnected.value) return true
+        return try {
+            val expectedComponent = ComponentName(appContext, AuraAccessibilityService::class.java)
+            val enabledServices = Settings.Secure.getString(
+                appContext.contentResolver,
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            ).orEmpty()
+            enabledServices.split(':').any {
+                ComponentName.unflattenFromString(it) == expectedComponent
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun openAccessibilitySettings(): String {
+        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return try {
+            appContext.startActivity(intent)
+            "Открыты настройки специальных возможностей Android"
+        } catch (_: Exception) {
+            "Откройте Настройки -> Специальные возможности -> Aura Control"
+        }
+    }
+
     fun refreshTelemetry() {
         val mediaPct = getStreamVolumePercent(AudioManager.STREAM_MUSIC)
         val ringPct = getStreamVolumePercent(AudioManager.STREAM_RING)
@@ -121,6 +153,8 @@ class AndroidSystemController(private val context: Context) {
             _telemetry.value.screenBrightnessPercent
         }
 
+        val a11yEnabled = isAccessibilityServiceEnabled()
+
         _telemetry.update {
             it.copy(
                 mediaVolumePercent = mediaPct,
@@ -130,6 +164,7 @@ class AndroidSystemController(private val context: Context) {
                 isCharging = charging,
                 isWifiConnected = wifiOn,
                 isBluetoothEnabled = btOn,
+                isAccessibilityEnabled = a11yEnabled,
                 screenBrightnessPercent = sysBrightness
             )
         }
@@ -194,7 +229,6 @@ class AndroidSystemController(private val context: Context) {
                 am.setStreamVolume(streamType, targetVol, AudioManager.FLAG_SHOW_UI)
             }
         } catch (_: SecurityException) {
-            // Do Not Disturb restriction fallback
         }
         _telemetry.update {
             when (streamType) {
@@ -280,9 +314,15 @@ class AndroidSystemController(private val context: Context) {
                 }
             }
         }
-        // Built-in system app fallbacks by common Russian/English names
         val fallbackIntent = when {
-            clean.contains("камер") || clean.contains("camera") -> Intent( android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
+            clean.contains("ютуб") || clean.contains("youtube") ->
+                Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com"))
+            clean.contains("телеграм") || clean.contains("telegram") ->
+                Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me"))
+            clean.contains("ватсап") || clean.contains("whatsapp") ->
+                Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me"))
+            clean.contains("камер") || clean.contains("camera") ->
+                Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
             clean.contains("браузер") || clean.contains("chrome") || clean.contains("интернет") ->
                 Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com"))
             clean.contains("карт") || clean.contains("maps") || clean.contains("навигатор") ->
@@ -298,7 +338,7 @@ class AndroidSystemController(private val context: Context) {
             fallbackIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             return try {
                 appContext.startActivity(fallbackIntent)
-                "Открыто системное приложение: $query"
+                "Открыто приложение: $query"
             } catch (_: Exception) {
                 "Команда запуска: $query"
             }
@@ -318,6 +358,193 @@ class AndroidSystemController(private val context: Context) {
             }
         }
         return "Не удалось запустить $label"
+    }
+
+    // --- Full Accessibility & In-App Control Bridge ---
+
+    fun executeGlobalAccessibilityAction(action: String): String {
+        val svc = AuraAccessibilityService.instance.value
+        if (svc != null) {
+            return svc.performGlobalSystemAction(action)
+        }
+        return "Включите Специальные возможности для действия: $action"
+    }
+
+    fun clickUiElementInApp(targetText: String, delayMs: Long = 0L): String {
+        val svc = AuraAccessibilityService.instance.value
+        if (svc == null) {
+            return "Для нажатия «$targetText» внутри приложений включите Специальные возможности Aura"
+        }
+        return if (delayMs > 0L) {
+            AuraAccessibilityService.runDelayed(delayMs) { it.clickElementByText(targetText) }
+            "Запланировано нажатие «$targetText» в приложении"
+        } else {
+            svc.clickElementByText(targetText)
+        }
+    }
+
+    fun inputTextInApp(fieldHint: String, textToType: String, delayMs: Long = 0L): String {
+        val svc = AuraAccessibilityService.instance.value
+        if (svc == null) {
+            return "Для авто-ввода «$textToType» внутри приложений включите Специальные возможности Aura"
+        }
+        return if (delayMs > 0L) {
+            AuraAccessibilityService.runDelayed(delayMs) {
+                it.inputTextIntoAppField(fieldHint, textToType, autoSubmit = true)
+            }
+            "Ввод текста «$textToType» в открытом приложении"
+        } else {
+            svc.inputTextIntoAppField(fieldHint, textToType, autoSubmit = true)
+        }
+    }
+
+    fun scrollInApp(direction: String, delayMs: Long = 0L): String {
+        val svc = AuraAccessibilityService.instance.value
+        if (svc == null) {
+            return "Для прокрутки ($direction) в приложениях включите Специальные возможности Aura"
+        }
+        return if (delayMs > 0L) {
+            AuraAccessibilityService.runDelayed(delayMs) { it.scrollOrSwipeScreen(direction) }
+            "Прокрутка экрана ($direction)"
+        } else {
+            svc.scrollOrSwipeScreen(direction)
+        }
+    }
+
+    fun tapScreenPercent(xPercent: Float, yPercent: Float, delayMs: Long = 0L): String {
+        val svc = AuraAccessibilityService.instance.value
+        if (svc == null) {
+            return "Для касания экрана включите Специальные возможности Aura"
+        }
+        return if (delayMs > 0L) {
+            AuraAccessibilityService.runDelayed(delayMs) { it.tapAtPercent(xPercent, yPercent) }
+            "Касание экрана (${xPercent.toInt()}%, ${yPercent.toInt()}%)"
+        } else {
+            svc.tapAtPercent(xPercent, yPercent)
+        }
+    }
+
+    fun readCurrentScreenContent(): String {
+        val svc = AuraAccessibilityService.instance.value
+        if (svc == null) {
+            return "Включите Специальные возможности Aura, чтобы читать элементы любого экрана"
+        }
+        return svc.readActiveScreenSummary()
+    }
+
+    fun searchInAppOrWeb(appNameOrTarget: String, searchQuery: String): String {
+        val lowerApp = appNameOrTarget.lowercase().trim()
+        val encoded = Uri.encode(searchQuery)
+
+        return try {
+            when {
+                lowerApp.contains("ютуб") || lowerApp.contains("youtube") -> {
+                    val ytIntent = Intent(Intent.ACTION_SEARCH).apply {
+                        setPackage("com.google.android.youtube")
+                        putExtra("query", searchQuery)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    try {
+                        appContext.startActivity(ytIntent)
+                    } catch (_: Exception) {
+                        val webYt = Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("https://www.youtube.com/results?search_query=$encoded")
+                        ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                        appContext.startActivity(webYt)
+                    }
+                    "Поиск в YouTube: «$searchQuery»"
+                }
+
+                lowerApp.contains("карт") || lowerApp.contains("maps") || lowerApp.contains("навиг") -> {
+                    val mapIntent = Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=$encoded")).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    appContext.startActivity(mapIntent)
+                    "Маршрут / поиск на Картах: «$searchQuery»"
+                }
+
+                lowerApp.contains("телеграм") || lowerApp.contains("telegram") -> {
+                    val tgIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        setPackage("org.telegram.messenger")
+                        putExtra(Intent.EXTRA_TEXT, searchQuery)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    try {
+                        appContext.startActivity(tgIntent)
+                    } catch (_: Exception) {
+                        openAppByQuery("Telegram")
+                        inputTextInApp("", searchQuery, delayMs = 1400L)
+                    }
+                    "Отправка в Telegram: «$searchQuery»"
+                }
+
+                lowerApp.contains("ватсап") || lowerApp.contains("whatsapp") -> {
+                    val waIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        setPackage("com.whatsapp")
+                        putExtra(Intent.EXTRA_TEXT, searchQuery)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    try {
+                        appContext.startActivity(waIntent)
+                    } catch (_: Exception) {
+                        openAppByQuery("WhatsApp")
+                        inputTextInApp("", searchQuery, delayMs = 1400L)
+                    }
+                    "Отправка в WhatsApp: «$searchQuery»"
+                }
+
+                lowerApp.isNotBlank() && lowerApp != "web" && lowerApp != "google" && lowerApp != "браузер" -> {
+                    // Launch the requested app and type the query via AccessibilityService
+                    openAppByQuery(appNameOrTarget)
+                    if (AuraAccessibilityService.isConnected.value) {
+                        AuraAccessibilityService.runDelayed(1500L) { svc ->
+                            svc.clickElementByText("Поиск")
+                            AuraAccessibilityService.runDelayed(600L) {
+                                it.inputTextIntoAppField("", searchQuery, autoSubmit = true)
+                            }
+                        }
+                        "Открыто «$appNameOrTarget» и введено «$searchQuery»"
+                    } else {
+                        "Открыто приложение «$appNameOrTarget» для запроса «$searchQuery»"
+                    }
+                }
+
+                else -> {
+                    val webIntent = Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("https://www.google.com/search?q=$encoded")
+                    ).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    appContext.startActivity(webIntent)
+                    "Поиск в Google: «$searchQuery»"
+                }
+            }
+        } catch (_: Exception) {
+            "Запрос «$searchQuery» выполнен"
+        }
+    }
+
+    fun controlMediaPlayback(command: String): String {
+        val am = audioManager ?: return "Аудио-менеджер недоступен"
+        val keyCode = when (command.uppercase()) {
+            "NEXT", "СЛЕДУЮЩИЙ", "ВПЕРЕД" -> KeyEvent.KEYCODE_MEDIA_NEXT
+            "PREVIOUS", "ПРЕДЫДУЩИЙ", "НАЗАД" -> KeyEvent.KEYCODE_MEDIA_PREVIOUS
+            "PAUSE", "ПАУЗА", "STOP", "СТОП" -> KeyEvent.KEYCODE_MEDIA_PAUSE
+            "PLAY", "ИГРАТЬ", "ПУСК" -> KeyEvent.KEYCODE_MEDIA_PLAY
+            else -> KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+        }
+        return try {
+            val now = SystemClock.uptimeMillis()
+            am.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, keyCode, 0))
+            am.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, keyCode, 0))
+            "Медиа-команда: $command"
+        } catch (_: Exception) {
+            "Медиа: $command"
+        }
     }
 
     fun resolveContactPhone(nameOrNumber: String): String {
@@ -363,6 +590,7 @@ class AndroidSystemController(private val context: Context) {
 
     fun openSystemSettings(section: String): String {
         val action = when (section.uppercase()) {
+            "ACCESSIBILITY", "СПЕЦИАЛЬНЫЕ_ВОЗМОЖНОСТИ" -> Settings.ACTION_ACCESSIBILITY_SETTINGS
             "WIFI", "INTERNET", "NETWORK" -> {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     Settings.Panel.ACTION_INTERNET_CONNECTIVITY
@@ -395,9 +623,11 @@ class AndroidSystemController(private val context: Context) {
 
     fun buildDeviceSummaryForAi(): String {
         val t = _telemetry.value
+        val a11yStatus = if (isAccessibilityServiceEnabled()) "АКТИВЕН (полное управление приложениями)" else "выкл"
         return "Заряд: ${t.batteryPercent}% (${if (t.isCharging) "заряжается" else "от батареи"}), " +
             "Фонарик: ${if (t.isTorchOn) "ВКЛ" else "ВЫКЛ"}, " +
             "Громкость медиа: ${t.mediaVolumePercent}%, звонка: ${t.ringVolumePercent}%, " +
-            "Яркость: ${t.screenBrightnessPercent}%, Wi-Fi: ${if (t.isWifiConnected) "подключён" else "выкл"}"
+            "Яркость: ${t.screenBrightnessPercent}%, Wi-Fi: ${if (t.isWifiConnected) "подключён" else "выкл"}, " +
+            "Accessibility-контроль: $a11yStatus"
     }
 }

@@ -328,6 +328,12 @@ fun RoutinesTab(
     }
 
     val availableStepPresets = listOf(
+        "OPEN_APP:YouTube" to "Открыть YouTube",
+        "OPEN_APP:Telegram" to "Открыть Telegram",
+        "CLICK:Поиск" to "Нажать «Поиск»",
+        "SCROLL:DOWN" to "Пролистать вниз",
+        "GLOBAL:SCREENSHOT" to "Скриншот экрана",
+        "GLOBAL:NOTIFICATIONS" to "Шторка уведомлений",
         "TORCH:ON" to "Фонарик ВКЛ",
         "TORCH:OFF" to "Фонарик ВЫКЛ",
         "VOLUME:85" to "Громкость 85%",
