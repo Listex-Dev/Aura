@@ -99,7 +99,22 @@ object GeminiRetrofitClient {
     }
 }
 
-class GeminiAssistantService {
+class GeminiAssistantService(private val appContext: android.content.Context? = null) {
+
+    companion object {
+        private const val PREFS_NAME = "aura_control_prefs"
+        private const val KEY_CUSTOM_GEMINI_API_KEY = "custom_gemini_api_key"
+
+        fun getSavedApiKey(context: android.content.Context): String {
+            val prefs = context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+            return prefs.getString(KEY_CUSTOM_GEMINI_API_KEY, "")?.trim().orEmpty()
+        }
+
+        fun saveApiKey(context: android.content.Context, apiKey: String) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+            prefs.edit().putString(KEY_CUSTOM_GEMINI_API_KEY, apiKey.trim()).apply()
+        }
+    }
 
     private val responseSchema: JsonObject = buildJsonObject {
         put("type", "OBJECT")
@@ -156,8 +171,14 @@ class GeminiAssistantService {
         installedAppNames: List<String>,
         routineNames: List<String>
     ): AssistantPlanResponse = withContext(Dispatchers.IO) {
-        val apiKey = BuildConfig.GEMINI_API_KEY
-        if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
+        val customKey = appContext?.let { getSavedApiKey(it) }.orEmpty()
+        val buildKey = BuildConfig.GEMINI_API_KEY.trim()
+        val apiKey = when {
+            customKey.isNotBlank() && customKey != "MY_GEMINI_API_KEY" -> customKey
+            buildKey.isNotBlank() && buildKey != "MY_GEMINI_API_KEY" -> buildKey
+            else -> ""
+        }
+        if (apiKey.isBlank()) {
             return@withContext parseCommandLocally(userQuery)
         }
 

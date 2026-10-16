@@ -42,7 +42,7 @@ class AssistantViewModel(
     appContext: Context
 ) : ViewModel() {
 
-    private val geminiService = GeminiAssistantService()
+    private val geminiService = GeminiAssistantService(appContext)
     val systemController = AndroidSystemController(appContext)
     val voiceEngine = VoiceAssistantEngine(appContext) { finalSpokenText ->
         executeVoiceOrTextCommand(finalSpokenText, activity = null)

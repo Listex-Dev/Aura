@@ -1,8 +1,8 @@
 package com.example
 
-import android.Manifest
-import android.content.pm.PackageManager
+import android.content.Context
 import android.os.Bundle
+import android.util.Base64
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
@@ -23,19 +24,24 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -53,13 +59,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.credentials.CredentialManager
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.example.ai.GeminiAssistantService
 import com.example.auth.AuthScreen
 import com.example.auth.signOutUser
 import com.example.data.repository.AssistantRepository
@@ -70,22 +76,20 @@ import com.example.ui.screens.RoutinesTab
 import com.example.ui.screens.VoiceOrbTab
 import com.example.ui.theme.MyApplicationTheme
 import com.example.voice.VoiceOrbMode
+import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-
-import android.content.Context
-import android.util.Base64
-import com.google.firebase.FirebaseApp
-import com.google.firebase.FirebaseOptions
+import kotlinx.coroutines.launch
 
 fun ensureFirebaseInitialized(context: Context) {
     if (FirebaseApp.getApps(context).isNotEmpty()) return
     val apiKey = String(
-        Base64.decode("QUl6YVN5Q01rRnpnN0h3OWZ3LVplVjRiOVR5UVJWWkxEWW9RUzRR", Base64.DEFAULT)
+        Base64.decode("QUl6YVN5Q01rRnpnN0h3OWZ3LVplVjRiOVRVUVJWWkxEWW9RUzRR", Base64.DEFAULT)
     ).trim()
     val options = FirebaseOptions.Builder()
         .setProjectId("frendlyapp-dfe42")
@@ -122,16 +126,19 @@ internal fun FirebaseAuth.authStateFlow(): Flow<FirebaseUser?> = callbackFlow {
 fun AppNavigation() {
     val auth = remember { FirebaseAuth.getInstance() }
     val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
+    var localModeSelected by rememberSaveable { mutableStateOf(false) }
     val user = currentUser
 
-    if (user == null) {
+    if (user == null && !localModeSelected) {
         AuthScreen(
-            onAuthSuccess = {}
+            onAuthSuccess = {},
+            onContinueLocalMode = { localModeSelected = true }
         )
     } else {
         MainAssistantScaffold(
-            currentUserId = user.uid,
-            userEmail = user.email ?: user.displayName ?: "Google Аккаунт"
+            currentUserId = user?.uid ?: AssistantRepository.LOCAL_DEVICE_UID,
+            userEmail = user?.email ?: user?.displayName ?: "Локальный режим Android",
+            onExitLocalMode = { localModeSelected = false }
         )
     }
 }
@@ -140,7 +147,8 @@ fun AppNavigation() {
 @Composable
 fun MainAssistantScaffold(
     currentUserId: String,
-    userEmail: String
+    userEmail: String,
+    onExitLocalMode: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -175,7 +183,8 @@ fun MainAssistantScaffold(
     val statusBanner by viewModel.statusBanner.collectAsStateWithLifecycle()
 
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
-    var pendingCallTarget by remember { mutableStateOf<String?>(null) }
+    var showApiKeyDialog by remember { mutableStateOf(false) }
+    var apiKeyInput by remember { mutableStateOf(GeminiAssistantService.getSavedApiKey(context)) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     BackHandler(enabled = selectedTab != 0) {
@@ -200,6 +209,51 @@ fun MainAssistantScaffold(
         } else {
             viewModel.voiceEngine.stopListening()
         }
+    }
+
+    if (showApiKeyDialog) {
+        AlertDialog(
+            onDismissRequest = { showApiKeyDialog = false },
+            title = { Text("Ключ Gemini AI API") },
+            text = {
+                Column {
+                    Text(
+                        text = "Укажите ваш ключ Gemini API (из Google AI Studio), чтобы активировать облачное понимание сложных голосовых запросов. Без ключа базовые системные команды работают локально.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = apiKeyInput,
+                        onValueChange = { apiKeyInput = it },
+                        label = { Text("GEMINI_API_KEY") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("gemini_api_key_input")
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        GeminiAssistantService.saveApiKey(context, apiKeyInput)
+                        showApiKeyDialog = false
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Ключ Gemini API сохранён")
+                        }
+                    },
+                    modifier = Modifier.testTag("save_gemini_api_key_button")
+                ) {
+                    Text("Сохранить")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showApiKeyDialog = false }) {
+                    Text("Отмена")
+                }
+            }
+        )
     }
 
     Scaffold(
@@ -235,9 +289,23 @@ fun MainAssistantScaffold(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                         )
                     }
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
                     IconButton(
                         onClick = {
+                            apiKeyInput = GeminiAssistantService.getSavedApiKey(context)
+                            showApiKeyDialog = true
+                        },
+                        modifier = Modifier.testTag("api_key_settings_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Key,
+                            contentDescription = "Настроить ключ Gemini API",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            onExitLocalMode()
                             signOutUser(
                                 credentialManager = credentialManager,
                                 onSignOutComplete = {},

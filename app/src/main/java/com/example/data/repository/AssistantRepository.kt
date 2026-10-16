@@ -5,16 +5,20 @@ import com.example.R
 import com.example.data.model.AutomationRoutine
 import com.example.data.model.CommandLog
 import com.example.data.model.SmartItem
+import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.snapshots
+import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
 
@@ -22,12 +26,24 @@ class AssistantRepository(
     private val db: FirebaseFirestore,
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
 ) {
+    companion object {
+        const val LOCAL_DEVICE_UID = "local_device_user"
+    }
+
+    private val localItemsFlow = MutableStateFlow<List<SmartItem>>(emptyList())
+    private val localRoutinesFlow = MutableStateFlow<List<AutomationRoutine>>(emptyList())
+    private val localHistoryFlow = MutableStateFlow<List<CommandLog>>(emptyList())
+
     constructor(context: Context) : this(
         FirebaseFirestore.getInstance(
             context.applicationContext.getString(R.string.firestore_database_id)
         ),
         FirebaseAuth.getInstance()
     )
+
+    private fun isLocalMode(userId: String = ""): Boolean {
+        return userId == LOCAL_DEVICE_UID || auth.currentUser == null
+    }
 
     private fun requireUserId(): String {
         return auth.currentUser?.uid
@@ -37,6 +53,10 @@ class AssistantRepository(
     // --- Smart Items (Notes, Tasks, Reminders) ---
 
     fun observeSmartItems(userId: String = auth.currentUser?.uid ?: ""): Flow<List<SmartItem>> = flow {
+        if (userId == LOCAL_DEVICE_UID) {
+            emitAll(localItemsFlow.asStateFlow())
+            return@flow
+        }
         val targetUid = userId.ifBlank { auth.currentUser?.uid ?: "unauthenticated" }
         val path = "users/$targetUid/items"
         emitAll(
@@ -67,13 +87,31 @@ class AssistantRepository(
         category: String = "NOTE",
         scheduledTime: String = ""
     ): Result<String> {
+        val cleanTitle = title.trim().take(120).ifBlank { "Заметка" }
+        val cleanContent = content.trim().take(1000)
+        val cleanCategory = if (category in listOf("NOTE", "TASK", "REMINDER")) category else "NOTE"
+        val cleanTime = scheduledTime.trim().take(64)
+
+        if (auth.currentUser == null) {
+            val id = UUID.randomUUID().toString()
+            val now = Timestamp.now()
+            val item = SmartItem(
+                id = id,
+                title = cleanTitle,
+                content = cleanContent,
+                category = cleanCategory,
+                isCompleted = false,
+                scheduledTime = cleanTime,
+                userId = LOCAL_DEVICE_UID,
+                createdAt = now,
+                updatedAt = now
+            )
+            localItemsFlow.value = listOf(item) + localItemsFlow.value
+            return Result.success(id)
+        }
+
         return try {
             val uid = requireUserId()
-            val cleanTitle = title.trim().take(120).ifBlank { "Заметка" }
-            val cleanContent = content.trim().take(1000)
-            val cleanCategory = if (category in listOf("NOTE", "TASK", "REMINDER")) category else "NOTE"
-            val cleanTime = scheduledTime.trim().take(64)
-
             val colRef = db.collection("users").document(uid).collection("items")
             val docRef = colRef.document()
             val payload = mapOf(
@@ -112,6 +150,12 @@ class AssistantRepository(
     }
 
     suspend fun toggleSmartItemCompleted(item: SmartItem): Result<Unit> {
+        if (auth.currentUser == null) {
+            localItemsFlow.value = localItemsFlow.value.map {
+                if (it.id == item.id) it.copy(isCompleted = !it.isCompleted, updatedAt = Timestamp.now()) else it
+            }
+            return Result.success(Unit)
+        }
         return try {
             val uid = requireUserId()
             require(item.id.isNotBlank()) { "Item ID must not be blank" }
@@ -133,6 +177,10 @@ class AssistantRepository(
     }
 
     suspend fun deleteSmartItem(itemId: String): Result<Unit> {
+        if (auth.currentUser == null) {
+            localItemsFlow.value = localItemsFlow.value.filterNot { it.id == itemId }
+            return Result.success(Unit)
+        }
         return try {
             val uid = requireUserId()
             val docRef = db.collection("users").document(uid).collection("items").document(itemId)
@@ -149,6 +197,10 @@ class AssistantRepository(
     // --- Automation Routines (Macros) ---
 
     fun observeRoutines(userId: String = auth.currentUser?.uid ?: ""): Flow<List<AutomationRoutine>> = flow {
+        if (userId == LOCAL_DEVICE_UID) {
+            emitAll(localRoutinesFlow.asStateFlow())
+            return@flow
+        }
         val targetUid = userId.ifBlank { auth.currentUser?.uid ?: "unauthenticated" }
         val path = "users/$targetUid/routines"
         emitAll(
@@ -179,11 +231,28 @@ class AssistantRepository(
         iconName: String,
         actionSteps: List<String>
     ): Result<String> {
+        val cleanSteps = actionSteps.map { it.trim().take(200) }.filter { it.isNotEmpty() }.take(10)
+            .ifEmpty { listOf("SPEAK:Сценарий запущен") }
+
+        if (auth.currentUser == null) {
+            val id = UUID.randomUUID().toString()
+            val now = Timestamp.now()
+            val routine = AutomationRoutine(
+                id = id,
+                title = title.trim().take(100).ifBlank { "Мой сценарий" },
+                triggerPhrase = triggerPhrase.trim().take(120).ifBlank { "Запусти сценарий" },
+                iconName = iconName.trim().take(40).ifBlank { "bolt" },
+                actionSteps = cleanSteps,
+                userId = LOCAL_DEVICE_UID,
+                createdAt = now,
+                updatedAt = now
+            )
+            localRoutinesFlow.value = listOf(routine) + localRoutinesFlow.value
+            return Result.success(id)
+        }
+
         return try {
             val uid = requireUserId()
-            val cleanSteps = actionSteps.map { it.trim().take(200) }.filter { it.isNotEmpty() }.take(10)
-                .ifEmpty { listOf("SPEAK:Сценарий запущен") }
-
             val colRef = db.collection("users").document(uid).collection("routines")
             val docRef = colRef.document()
             val payload = mapOf(
@@ -206,6 +275,10 @@ class AssistantRepository(
     }
 
     suspend fun deleteRoutine(routineId: String): Result<Unit> {
+        if (auth.currentUser == null) {
+            localRoutinesFlow.value = localRoutinesFlow.value.filterNot { it.id == routineId }
+            return Result.success(Unit)
+        }
         return try {
             val uid = requireUserId()
             val docRef = db.collection("users").document(uid).collection("routines").document(routineId)
@@ -222,6 +295,10 @@ class AssistantRepository(
     // --- Command History Logs ---
 
     fun observeHistory(userId: String = auth.currentUser?.uid ?: ""): Flow<List<CommandLog>> = flow {
+        if (userId == LOCAL_DEVICE_UID) {
+            emitAll(localHistoryFlow.asStateFlow())
+            return@flow
+        }
         val targetUid = userId.ifBlank { auth.currentUser?.uid ?: "unauthenticated" }
         val path = "users/$targetUid/history"
         emitAll(
@@ -251,6 +328,20 @@ class AssistantRepository(
         assistantReply: String,
         executedActions: List<String>
     ): Result<String> {
+        if (auth.currentUser == null) {
+            val id = UUID.randomUUID().toString()
+            val log = CommandLog(
+                id = id,
+                userQuery = userQuery.trim().take(500).ifBlank { "Голосовая команда" },
+                assistantReply = assistantReply.trim().take(1000).ifBlank { "Выполнено" },
+                executedActions = executedActions.map { it.take(200) }.take(10),
+                userId = LOCAL_DEVICE_UID,
+                createdAt = Timestamp.now()
+            )
+            localHistoryFlow.value = listOf(log) + localHistoryFlow.value
+            return Result.success(id)
+        }
+
         return try {
             val uid = requireUserId()
             val colRef = db.collection("users").document(uid).collection("history")
@@ -273,6 +364,10 @@ class AssistantRepository(
     }
 
     suspend fun deleteCommandLog(logId: String): Result<Unit> {
+        if (auth.currentUser == null) {
+            localHistoryFlow.value = localHistoryFlow.value.filterNot { it.id == logId }
+            return Result.success(Unit)
+        }
         return try {
             val uid = requireUserId()
             val docRef = db.collection("users").document(uid).collection("history").document(logId)
