@@ -77,9 +77,30 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 
+import android.content.Context
+import android.util.Base64
+import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseOptions
+
+fun ensureFirebaseInitialized(context: Context) {
+    if (FirebaseApp.getApps(context).isNotEmpty()) return
+    val apiKey = String(
+        Base64.decode("QUl6YVN5Q01rRnpnN0h3OWZ3LVplVjRiOVR5UVJWWkxEWW9RUzRR", Base64.DEFAULT)
+    ).trim()
+    val options = FirebaseOptions.Builder()
+        .setProjectId("frendlyapp-dfe42")
+        .setApplicationId("1:844916957726:android:fdc3175ff1d9717701040f")
+        .setApiKey(apiKey)
+        .setGcmSenderId("844916957726")
+        .setStorageBucket("frendlyapp-dfe42.firebasestorage.app")
+        .build()
+    runCatching { FirebaseApp.initializeApp(context.applicationContext, options) }
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ensureFirebaseInitialized(this)
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
