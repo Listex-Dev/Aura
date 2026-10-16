@@ -109,6 +109,8 @@ fun DeviceControlTab(
     val isOverlayShowing by AuraOverlayManager.isOverlayShowing.collectAsState()
     val overlayVisualState by AuraOverlayManager.visualState.collectAsState()
     val overlayActionText by AuraOverlayManager.currentActionText.collectAsState()
+    val lastAiReasoning by AuraOverlayManager.lastAiReasoning.collectAsState()
+    val lastTappedCoordinates by AuraOverlayManager.lastTappedCoordinates.collectAsState()
     val a11yActive = isA11yConnected || telemetry.isAccessibilityEnabled
 
     val allPermissionsLauncher = rememberLauncherForActivityResult(
@@ -122,6 +124,9 @@ fun DeviceControlTab(
     var appSearchQuery by remember { mutableStateOf("") }
     var targetAppName by remember { mutableStateOf("YouTube") }
     var inAppActionPayload by remember { mutableStateOf("") }
+    var coordXInput by remember { mutableStateOf("540") }
+    var coordYInput by remember { mutableStateOf("960") }
+    var aiContextPromptInput by remember { mutableStateOf("") }
     var contactTarget by remember { mutableStateOf("") }
     var smsText by remember { mutableStateOf("") }
     var alarmTimeInput by remember { mutableStateOf("07:30") }
@@ -415,10 +420,126 @@ fun DeviceControlTab(
                         }
                     }
 
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Live Gemini AI Context Reasoning & Coordinates Box
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f))
+                            .padding(12.dp)
+                    ) {
+                        Text(
+                            text = "🧠 ИИ-Контекст Gemini (анализ экрана и координат):",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = lastAiReasoning,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        if (lastTappedCoordinates.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Последняя цель: $lastTappedCoordinates",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.tertiary
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Contextual AI Action Input
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = aiContextPromptInput,
+                            onValueChange = { aiContextPromptInput = it },
+                            label = { Text("Команда Gemini по контексту экрана") },
+                            placeholder = { Text("Напр.: Найди поиск и введи музыка") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("ai_context_command_input"),
+                            shape = RoundedCornerShape(14.dp)
+                        )
+                        Button(
+                            onClick = {
+                                val cmd = aiContextPromptInput.trim().ifBlank {
+                                    "Проанализируй контекст экрана через Gemini и нажми на самый нужный целевой элемент"
+                                }
+                                AuraOverlayManager.onQuickCommandRequested?.invoke(cmd)
+                            },
+                            modifier = Modifier
+                                .height(54.dp)
+                                .testTag("run_ai_context_command_button"),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(Icons.Default.TouchApp, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("ИИ-Клик")
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Exact Pixel Coordinate Tapper (with Crosshair)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = coordXInput,
+                            onValueChange = { coordXInput = it.filter { ch -> ch.isDigit() } },
+                            label = { Text("X (px)") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("coord_x_input"),
+                            shape = RoundedCornerShape(14.dp)
+                        )
+                        OutlinedTextField(
+                            value = coordYInput,
+                            onValueChange = { coordYInput = it.filter { ch -> ch.isDigit() } },
+                            label = { Text("Y (px)") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("coord_y_input"),
+                            shape = RoundedCornerShape(14.dp)
+                        )
+                        FilledTonalButton(
+                            onClick = {
+                                val x = coordXInput.toIntOrNull() ?: 540
+                                val y = coordYInput.toIntOrNull() ?: 960
+                                val res = systemController.tapExactPixelInApp(x, y, "Точный тест ($x, $y)")
+                                onFeedbackSpoken(res)
+                            },
+                            modifier = Modifier
+                                .height(54.dp)
+                                .testTag("tap_exact_coordinates_button"),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(Icons.Default.TouchApp, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Тык (X,Y)")
+                        }
+                    }
+
                     if (screenElements.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(10.dp))
                         Text(
-                            text = "Обнаруженные кнопки и поля на экране (нажмите для клика):",
+                            text = "Интерактивная сетка элементов и пиксельных координат (нажмите для точного клика):",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -429,14 +550,16 @@ fun DeviceControlTab(
                                 .horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            screenElements.take(15).forEach { el ->
+                            screenElements.take(25).forEach { el ->
                                 AssistChip(
                                     onClick = {
-                                        val res = systemController.clickElementByIndex(el.index)
+                                        coordXInput = el.centerX.toString()
+                                        coordYInput = el.centerY.toString()
+                                        val res = systemController.clickElementByIndex(el.index, el.label)
                                         onFeedbackSpoken(res)
                                     },
                                     label = {
-                                        Text("#${el.index} ${el.label.take(22)} (${el.xPercent}%,${el.yPercent}%)")
+                                        Text("#${el.index} ${el.label.take(20)} (${el.centerX},${el.centerY}px • ${el.xPercent}%,${el.yPercent}%)")
                                     },
                                     leadingIcon = {
                                         Icon(
