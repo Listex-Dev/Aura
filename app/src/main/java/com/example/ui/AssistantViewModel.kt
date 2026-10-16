@@ -67,6 +67,16 @@ class AssistantViewModel(
     private val _statusBanner = MutableStateFlow<String?>(null)
     val statusBanner: StateFlow<String?> = _statusBanner.asStateFlow()
 
+    init {
+        com.example.system.AuraOverlayManager.onMicCommandRequested = {
+            voiceEngine.toggleListening()
+        }
+        com.example.system.AuraOverlayManager.onQuickCommandRequested = { cmd ->
+            executeVoiceOrTextCommand(cmd, activity = null)
+        }
+        com.example.system.AuraOverlayManager.showOverlay(appContext)
+    }
+
     val smartItemsState: StateFlow<UiState<List<SmartItem>>> = repository.observeSmartItems(currentUserId)
         .map<List<SmartItem>, UiState<List<SmartItem>>> { UiState.Success(it) }
         .catch { error ->
@@ -113,6 +123,13 @@ class AssistantViewModel(
 
         viewModelScope.launch {
             voiceEngine.setThinkingState()
+            com.example.system.AuraOverlayManager.updateStatus(
+                com.example.system.AuraOverlayVisualState.ANALYZING,
+                "Анализирую: «${cleanQuery.take(28)}»"
+            )
+
+            // Refresh screen inspection before planning so AI sees the latest buttons & inputs
+            com.example.system.AuraAccessibilityService.instance.value?.inspectCurrentScreen(silentOverlayStatus = true)
 
             // First check if query matches a saved routine trigger phrase
             val currentRoutines = (routinesState.value as? UiState.Success)?.data.orEmpty()
@@ -138,7 +155,9 @@ class AssistantViewModel(
             val executedBadges = mutableListOf<String>()
             var launchedAppInChain = false
             for (action in plan.actions) {
-                if (action.actionType.equals("OPEN_APP", ignoreCase = true)) {
+                if (action.actionType.equals("OPEN_APP", ignoreCase = true) ||
+                    action.actionType.equals("SEARCH_IN_APP", ignoreCase = true)
+                ) {
                     launchedAppInChain = true
                 }
                 val badge = executeSingleAndroidAction(action, activity, delayForCrossApp = launchedAppInChain)
@@ -176,6 +195,10 @@ class AssistantViewModel(
         delayForCrossApp: Boolean = false
     ): String {
         val crossAppDelay = if (delayForCrossApp) 1500L else 0L
+        com.example.system.AuraOverlayManager.updateStatus(
+            com.example.system.AuraOverlayVisualState.ACTING,
+            "Действие: ${action.actionType} ${action.target.take(18)}"
+        )
         return when (action.actionType.uppercase()) {
             "TORCH_ON" -> systemController.setTorch(true)
             "TORCH_OFF" -> systemController.setTorch(false)
@@ -203,11 +226,30 @@ class AssistantViewModel(
                     searchQuery = action.value.ifBlank { action.target }
                 )
             }
+            "ANALYZE_SCREEN" -> {
+                systemController.inspectCurrentScreenElements()
+            }
             "CLICK_UI" -> {
                 systemController.clickUiElementInApp(
                     targetText = action.target.ifBlank { action.value },
                     delayMs = crossAppDelay
                 )
+            }
+            "CLICK_INDEX" -> {
+                val idx = (action.target.ifBlank { action.value }).filter { it.isDigit() }.toIntOrNull() ?: 1
+                systemController.clickElementByIndex(idx, delayMs = crossAppDelay)
+            }
+            "LONG_CLICK_UI" -> {
+                systemController.longClickUiElementInApp(
+                    targetText = action.target.ifBlank { action.value },
+                    delayMs = crossAppDelay
+                )
+            }
+            "SHOW_OVERLAY" -> {
+                systemController.showFloatingAvatarOverlay()
+            }
+            "HIDE_OVERLAY" -> {
+                systemController.hideFloatingAvatarOverlay()
             }
             "INPUT_TEXT" -> {
                 systemController.inputTextInApp(

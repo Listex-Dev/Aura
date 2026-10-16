@@ -140,14 +140,14 @@ class GeminiAssistantService(private val appContext: android.content.Context? = 
                             put("type", "STRING")
                             put(
                                 "description",
-                                "One of: TORCH_ON, TORCH_OFF, SET_VOLUME, SET_BRIGHTNESS, SET_ALARM, SET_TIMER, OPEN_APP, SEARCH_IN_APP, CLICK_UI, INPUT_TEXT, SCROLL_SCREEN, TAP_SCREEN, GLOBAL_ACTION, READ_SCREEN, MEDIA_CONTROL, CALL_CONTACT, SEND_SMS, OPEN_SETTINGS, CREATE_NOTE, CREATE_TASK, CREATE_REMINDER, RUN_ROUTINE, NONE"
+                                "One of: TORCH_ON, TORCH_OFF, SET_VOLUME, SET_BRIGHTNESS, SET_ALARM, SET_TIMER, OPEN_APP, SEARCH_IN_APP, ANALYZE_SCREEN, CLICK_UI, CLICK_INDEX, LONG_CLICK_UI, INPUT_TEXT, SCROLL_SCREEN, TAP_SCREEN, GLOBAL_ACTION, READ_SCREEN, SHOW_OVERLAY, HIDE_OVERLAY, MEDIA_CONTROL, CALL_CONTACT, SEND_SMS, OPEN_SETTINGS, CREATE_NOTE, CREATE_TASK, CREATE_REMINDER, RUN_ROUTINE, NONE"
                             )
                         }
                         putJsonObject("target") {
                             put("type", "STRING")
                             put(
                                 "description",
-                                "Target app name, UI button text to click, input field hint, scroll direction (DOWN/UP/LEFT/RIGHT), global action (BACK/HOME/RECENTS/NOTIFICATIONS/QUICK_SETTINGS/LOCK_SCREEN/SCREENSHOT/SPLIT_SCREEN), media command (PLAY_PAUSE/NEXT/PREVIOUS), settings section, or note/task title."
+                                "Target app name, UI button text to click, UI element index ('1', '2', '#3'), input field hint, scroll direction (DOWN/UP/LEFT/RIGHT), global action (BACK/HOME/RECENTS/NOTIFICATIONS/QUICK_SETTINGS/LOCK_SCREEN/SCREENSHOT/SPLIT_SCREEN), media command (PLAY_PAUSE/NEXT/PREVIOUS), settings section, or note/task title."
                             )
                         }
                         putJsonObject("value") {
@@ -190,32 +190,32 @@ class GeminiAssistantService(private val appContext: android.content.Context? = 
         }
 
         val systemPrompt = """
-            Ты — Аура (Aura Control), живой, эмоциональный и умный голосовой ИИ-ассистент с полным управлением Android через AccessibilityService.
+            Ты — Аура (Aura Control), живой, эмоциональный и умный голосовой ИИ-ассистент с полным управлением Android через AccessibilityService и плавающим аватаром поверх всех окон.
             Твой голос звучит тепло, живо и естественно, как у настоящего человека-помощника (без канцеляризмов и роботизированных фраз).
             В поле spokenResponse пиши живой разговорный ответ на русском языке (1-2 коротких предложения с естественной интонацией).
             
-            Ты можешь выполнять ЛЮБЫЕ действия в любых приложениях и в системе Android, комбинируя шаги в массиве actions:
+            Ты видишь структуру текущего экрана (список кнопок [#1], [#2], полей ввода и координат в "Состояние смартфона") и можешь выполнять ЛЮБЫЕ действия в любых приложениях, комбинируя шаги в массиве actions:
             1. OPEN_APP — запустить любое приложение (target: название приложения).
-            2. SEARCH_IN_APP — найти или открыть что-то внутри приложения или браузера (target: "YouTube", "Telegram", "WhatsApp", "Maps", "Google" или имя приложения; value: поисковый запрос или сообщение).
-            3. CLICK_UI — нажать на любую кнопку, вкладку или элемент на экране по тексту/описанию через Специальные возможности (target: текст кнопки/элемента, например "Поиск", "Отправить", "Лайк", "Подписаться").
-            4. INPUT_TEXT — ввести текст в поле ввода любого открытого приложения и отправить (target: подсказка поля или пусто "", value: текст для ввода).
-            5. SCROLL_SCREEN — прокрутить или свайпнуть экран в любом приложении (target: "DOWN", "UP", "LEFT", "RIGHT").
-            6. TAP_SCREEN — коснуться экрана по координатам в процентах (target: "50,50", value: "").
-            7. GLOBAL_ACTION — выполнить глобальное системное действие Android (target: "BACK", "HOME", "RECENTS", "NOTIFICATIONS", "QUICK_SETTINGS", "LOCK_SCREEN", "SCREENSHOT", "SPLIT_SCREEN").
-            8. READ_SCREEN — прочитать вслух содержимое текущего экрана (target: "SCREEN", value: "").
-            9. MEDIA_CONTROL — управление музыкой/видео в любом плеере (target: "PLAY_PAUSE", "NEXT", "PREVIOUS", "PLAY", "PAUSE").
-            10. TORCH_ON / TORCH_OFF — включить/выключить фонарик.
-            11. SET_VOLUME — изменить громкость (target: "MEDIA", "RING", "ALARM"; value: "0".."100").
-            12. SET_BRIGHTNESS — изменить яркость (target: "SCREEN", value: "10".."100").
-            13. SET_ALARM — будильник (target: название, value: "HH:MM").
-            14. SET_TIMER — таймер (target: название, value: секунды).
-            15. CALL_CONTACT / SEND_SMS — звонок или SMS.
-            16. OPEN_SETTINGS — открыть настройки ("ACCESSIBILITY", "WIFI", "BLUETOOTH", "SOUND", "DISPLAY", "LOCATION", "GENERAL").
-            17. CREATE_NOTE / CREATE_TASK / CREATE_REMINDER / RUN_ROUTINE.
+            2. ANALYZE_SCREEN — проанализировать все кнопки, поля и элементы на текущем экране (target: "SCREEN", value: "").
+            3. CLICK_UI — нажать на любую кнопку, вкладку, иконку или элемент на экране по тексту/смыслу (target: текст элемента, например "Поиск", "Отправить", "Лайк", "Подписаться", "первое видео", "первый чат").
+            4. CLICK_INDEX — нажать элемент по его номеру из анализа экрана (target: номер элемента, например "1", "2", "3").
+            5. LONG_CLICK_UI — долгое нажатие (удержание) на элементе (target: текст или название элемента).
+            6. INPUT_TEXT — ввести текст в поле ввода любого открытого приложения и отправить (target: подсказка поля или пусто "", value: текст для ввода).
+            7. SEARCH_IN_APP — найти или открыть что-то внутри приложения или браузера (target: "YouTube", "Telegram", "WhatsApp", "Maps", "Google" или имя приложения; value: поисковый запрос или сообщение).
+            8. SCROLL_SCREEN — прокрутить или свайпнуть экран в любом приложении (target: "DOWN", "UP", "LEFT", "RIGHT").
+            9. TAP_SCREEN — коснуться экрана по координатам в процентах (target: "50,50", value: "").
+            10. GLOBAL_ACTION — выполнить глобальное системное действие Android (target: "BACK", "HOME", "RECENTS", "NOTIFICATIONS", "QUICK_SETTINGS", "LOCK_SCREEN", "SCREENSHOT", "SPLIT_SCREEN").
+            11. READ_SCREEN — прочитать вслух содержимое и кнопки текущего экрана (target: "SCREEN", value: "").
+            12. SHOW_OVERLAY / HIDE_OVERLAY — показать или скрыть плавающий аватар Ауры поверх всех приложений.
+            13. MEDIA_CONTROL — управление музыкой/видео в любом плеере (target: "PLAY_PAUSE", "NEXT", "PREVIOUS", "PLAY", "PAUSE").
+            14. TORCH_ON / TORCH_OFF — включить/выключить фонарик.
+            15. SET_VOLUME — изменить громкость (target: "MEDIA", "RING", "ALARM"; value: "0".."100").
+            16. SET_BRIGHTNESS — изменить яркость (target: "SCREEN", value: "10".."100").
+            17. SET_ALARM / SET_TIMER / CALL_CONTACT / SEND_SMS / OPEN_SETTINGS / CREATE_NOTE / CREATE_TASK / CREATE_REMINDER / RUN_ROUTINE.
             
-            Если пользователь просит составное действие (например: "Открой YouTube и включи музыку для работы" или "Открой Телеграм и напиши привет"), возвращай последовательность действий в массиве actions!
+            Если пользователь просит составное действие (например: "Открой YouTube, найди музыку и включи первое видео" или "Поставь лайк и пролистай дальше"), возвращай всю цепочку действий в массиве actions!
             
-            Состояние смартфона: $deviceContextSummary
+            Состояние смартфона и элементы экрана: $deviceContextSummary
             Установленные приложения: ${installedAppNames.take(45).joinToString(", ")}
             Сценарии: ${routineNames.joinToString(", ")}
         """.trimIndent()
@@ -247,6 +247,15 @@ class GeminiAssistantService(private val appContext: android.content.Context? = 
         val lower = query.lowercase().trim()
         val actions = mutableListOf<AndroidActionCommand>()
         val replies = mutableListOf<String>()
+
+        // 0. Floating Avatar Overlay commands
+        if (lower.contains("покажи аватар") || lower.contains("включи аватар") || lower.contains("поверх всех") || lower.contains("включи оверлей")) {
+            actions.add(AndroidActionCommand("SHOW_OVERLAY", "OVERLAY", ""))
+            replies.add("Запускаю мой плавающий аватар поверх всех приложений!")
+        } else if (lower.contains("скрой аватар") || lower.contains("убери аватар") || lower.contains("выключи оверлей")) {
+            actions.add(AndroidActionCommand("HIDE_OVERLAY", "OVERLAY", ""))
+            replies.add("Скрываю плавающий аватар")
+        }
 
         // 1. Global System & Accessibility Actions (Screenshot, Home, Back, Notifications, Lock, Recents)
         when {
@@ -284,8 +293,11 @@ class GeminiAssistantService(private val appContext: android.content.Context? = 
             }
         }
 
-        // 2. Screen Reading
-        if (lower.contains("что на экране") || lower.contains("прочитай экран")) {
+        // 2. Screen Reading & Deep Screen Analysis
+        if (lower.contains("анализ экран") || lower.contains("проанализируй экран") || lower.contains("какие кнопки")) {
+            actions.add(AndroidActionCommand("ANALYZE_SCREEN", "SCREEN", ""))
+            replies.add("Сканирую все кнопки и элементы на текущем экране!")
+        } else if (lower.contains("что на экране") || lower.contains("прочитай экран")) {
             actions.add(AndroidActionCommand("READ_SCREEN", "SCREEN", ""))
             replies.add("Считываю элементы текущего экрана")
         }
@@ -302,14 +314,33 @@ class GeminiAssistantService(private val appContext: android.content.Context? = 
             replies.add("Прокручиваю экран")
         }
 
-        // 4. Click UI Element by voice ("нажми ...", "кликни ...")
-        if (lower.startsWith("нажми ") || lower.startsWith("кликни ") || lower.contains("нажми на ")) {
+        // 4. Click UI Element by voice ("нажми ...", "кликни ...", "поставь лайк", "подпишись")
+        if (lower.contains("поставь лайк") || lower == "лайк") {
+            actions.add(AndroidActionCommand("CLICK_UI", "лайк", ""))
+            replies.add("Ставлю лайк!")
+        } else if (lower.contains("подпишись") || lower.contains("нажми подписаться")) {
+            actions.add(AndroidActionCommand("CLICK_UI", "подписаться", ""))
+            replies.add("Нажимаю кнопку Подписаться!")
+        } else if (lower.startsWith("зажми ") || lower.startsWith("удерживай ") || lower.contains("долгое нажатие")) {
+            val target = query.replace(Regex("(?i)^(зажми|удерживай|долгое нажатие на|долгое нажатие)\\s*"), "").trim()
+            if (target.isNotEmpty()) {
+                actions.add(AndroidActionCommand("LONG_CLICK_UI", target, ""))
+                replies.add("Удерживаю элемент «$target»")
+            }
+        } else if (lower.startsWith("нажми ") || lower.startsWith("кликни ") || lower.contains("нажми на ") || lower.startsWith("выбери ")) {
             val buttonTarget = query
-                .replace(Regex("(?i)^(нажми на кнопку|нажми на|нажми кнопку|нажми|кликни на|кликни)\\s*"), "")
+                .replace(Regex("(?i)^(нажми на кнопку|нажми на|нажми кнопку|нажми|кликни на|кликни|выбери)\\s*"), "")
                 .trim()
             if (buttonTarget.isNotEmpty()) {
-                actions.add(AndroidActionCommand("CLICK_UI", buttonTarget, ""))
-                replies.add("Нажимаю на «$buttonTarget»")
+                val idxMatch = Regex("^#?(\\d{1,2})$").find(buttonTarget)
+                if (idxMatch != null) {
+                    val idx = idxMatch.groupValues[1]
+                    actions.add(AndroidActionCommand("CLICK_INDEX", idx, ""))
+                    replies.add("Нажимаю на элемент номер $idx!")
+                } else {
+                    actions.add(AndroidActionCommand("CLICK_UI", buttonTarget, ""))
+                    replies.add("Нажимаю на «$buttonTarget»")
+                }
             }
         }
 

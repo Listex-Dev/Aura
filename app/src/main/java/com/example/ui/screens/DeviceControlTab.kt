@@ -83,8 +83,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import com.example.system.AndroidSystemController
 import com.example.system.AuraAccessibilityService
+import com.example.system.AuraOverlayManager
 import com.example.system.DeviceTelemetryState
 import kotlin.math.roundToInt
 
@@ -100,6 +105,10 @@ fun DeviceControlTab(
 
     val isA11yConnected by AuraAccessibilityService.isConnected.collectAsState()
     val lastA11yReport by AuraAccessibilityService.lastActionReport.collectAsState()
+    val screenElements by AuraAccessibilityService.screenElements.collectAsState()
+    val isOverlayShowing by AuraOverlayManager.isOverlayShowing.collectAsState()
+    val overlayVisualState by AuraOverlayManager.visualState.collectAsState()
+    val overlayActionText by AuraOverlayManager.currentActionText.collectAsState()
     val a11yActive = isA11yConnected || telemetry.isAccessibilityEnabled
 
     val allPermissionsLauncher = rememberLauncherForActivityResult(
@@ -308,6 +317,137 @@ fun DeviceControlTab(
                                 )
                             }
                         )
+                    }
+                }
+            }
+        }
+
+        // Floating Avatar Overlay & Live Screen Analyzer Card
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        1.dp,
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
+                        RoundedCornerShape(24.dp)
+                    ),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.img_aura_avatar_1792153220147),
+                                contentDescription = "Плавающий аватар Ауры",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(54.dp)
+                                    .clip(CircleShape)
+                                    .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Аватар Ауры поверх всех окон",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "${overlayVisualState.badgeTitle} • $overlayActionText",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = isOverlayShowing,
+                            onCheckedChange = {
+                                val msg = systemController.toggleFloatingAvatarOverlay()
+                                onFeedbackSpoken(msg)
+                            },
+                            modifier = Modifier.testTag("floating_avatar_switch")
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                val msg = systemController.showFloatingAvatarOverlay()
+                                onFeedbackSpoken(msg)
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("show_overlay_hud_button"),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(if (isOverlayShowing) "Аватар активен" else "Запустить аватар")
+                        }
+                        FilledTonalButton(
+                            onClick = {
+                                val msg = systemController.inspectCurrentScreenElements()
+                                onFeedbackSpoken(msg)
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("analyze_screen_elements_button"),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Анализ экрана (${screenElements.size})")
+                        }
+                    }
+
+                    if (screenElements.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "Обнаруженные кнопки и поля на экране (нажмите для клика):",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            screenElements.take(15).forEach { el ->
+                                AssistChip(
+                                    onClick = {
+                                        val res = systemController.clickElementByIndex(el.index)
+                                        onFeedbackSpoken(res)
+                                    },
+                                    label = {
+                                        Text("#${el.index} ${el.label.take(22)} (${el.xPercent}%,${el.yPercent}%)")
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.TouchApp,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
             }

@@ -527,6 +527,60 @@ class AndroidSystemController(private val context: Context) {
         }
     }
 
+    fun clickElementByIndex(index: Int, delayMs: Long = 0L): String {
+        val svc = AuraAccessibilityService.instance.value
+            ?: return "Включите Специальные возможности Aura для нажатия элемента #$index"
+        return if (delayMs > 0L) {
+            AuraAccessibilityService.runDelayed(delayMs) { it.clickElementByIndex(index) }
+            "Нажатие на элемент #$index"
+        } else {
+            svc.clickElementByIndex(index)
+        }
+    }
+
+    fun longClickUiElementInApp(targetText: String, delayMs: Long = 0L): String {
+        val svc = AuraAccessibilityService.instance.value
+            ?: return "Включите Специальные возможности Aura для долгого нажатия «$targetText»"
+        return if (delayMs > 0L) {
+            AuraAccessibilityService.runDelayed(delayMs) { it.longClickElement(targetText) }
+            "Долгое нажатие на «$targetText»"
+        } else {
+            svc.longClickElement(targetText)
+        }
+    }
+
+    fun inspectCurrentScreenElements(): String {
+        val svc = AuraAccessibilityService.instance.value
+            ?: return "Включите Специальные возможности Aura для глубокого анализа экрана"
+        val items = svc.inspectCurrentScreen()
+        val clickable = items.count { it.isClickable }
+        val inputs = items.count { it.isEditable }
+        return "Экран проанализирован: найдено ${items.size} элементов ($clickable кнопок, $inputs полей ввода)"
+    }
+
+    fun showFloatingAvatarOverlay(): String {
+        val ok = AuraOverlayManager.showOverlay(appContext)
+        return if (ok) {
+            "Плавающий аватар Ауры запущен поверх всех приложений"
+        } else {
+            openOverlayAccess()
+            "Разрешите «Поверх всех окон» или включите Accessibility для показа аватара Ауры"
+        }
+    }
+
+    fun hideFloatingAvatarOverlay(): String {
+        AuraOverlayManager.hideOverlay()
+        return "Плавающий аватар Ауры скрыт"
+    }
+
+    fun toggleFloatingAvatarOverlay(): String {
+        return if (AuraOverlayManager.isOverlayShowing.value) {
+            hideFloatingAvatarOverlay()
+        } else {
+            showFloatingAvatarOverlay()
+        }
+    }
+
     fun inputTextInApp(fieldHint: String, textToType: String, delayMs: Long = 0L): String {
         val svc = AuraAccessibilityService.instance.value
         if (svc == null) {
@@ -822,10 +876,12 @@ class AndroidSystemController(private val context: Context) {
     fun buildDeviceSummaryForAi(): String {
         val t = _telemetry.value
         val a11yStatus = if (isAccessibilityServiceEnabled()) "АКТИВЕН (полное управление приложениями)" else "выкл"
+        val screenStructure = AuraAccessibilityService.screenStructureSummary.value
         return "Заряд: ${t.batteryPercent}% (${if (t.isCharging) "заряжается" else "от батареи"}), " +
             "Фонарик: ${if (t.isTorchOn) "ВКЛ" else "ВЫКЛ"}, " +
             "Громкость медиа: ${t.mediaVolumePercent}%, звонка: ${t.ringVolumePercent}%, " +
             "Яркость: ${t.screenBrightnessPercent}%, Wi-Fi: ${if (t.isWifiConnected) "подключён" else "выкл"}, " +
-            "Accessibility-контроль: $a11yStatus"
+            "Accessibility-контроль: $a11yStatus. " +
+            "Текущие элементы на экране: $screenStructure"
     }
 }

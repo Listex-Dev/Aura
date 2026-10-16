@@ -80,7 +80,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.R
 import com.example.data.model.CommandLog
+import com.example.system.AuraOverlayManager
 import com.example.ui.LastExecutionCard
 import com.example.ui.UiState
 import com.example.voice.VoiceOrbMode
@@ -89,18 +95,18 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 private val QUICK_VOICE_COMMANDS = listOf(
+    "Проанализируй экран",
+    "Покажи аватар поверх всех окон",
     "Открой YouTube и найди музыку для работы",
+    "Нажми на первое видео",
+    "Нажми Поиск",
+    "Поставь лайк",
     "Сделай скриншот экрана",
-    "Открой уведомления",
     "Пролистай вниз",
     "Что сейчас на экране?",
     "Открой Телеграм и напиши Привет!",
     "Включи фонарик",
-    "Выключи фонарик",
-    "Следующий трек",
-    "Поставь будильник на 07:30",
-    "Таймер на 5 минут",
-    "Громкость на 80%"
+    "Следующий трек"
 )
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -212,7 +218,7 @@ fun VoiceOrbTab(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Animated Energy Orb
+                    // Animated Energy Orb with Aura's Portrait
                     InteractiveVoiceOrb(
                         orbMode = orbMode,
                         rmsAmplitude = rmsAmplitude,
@@ -236,7 +242,56 @@ fun VoiceOrbTab(
                         textAlign = TextAlign.Center
                     )
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Floating Avatar Overlay & Live Action Status Bar
+                    val isOverlayOn by AuraOverlayManager.isOverlayShowing.collectAsStateWithLifecycle()
+                    val overlayAction by AuraOverlayManager.currentActionText.collectAsStateWithLifecycle()
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(18.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (isOverlayOn) "🟢 Аватар Ауры поверх всех окон: АКТИВЕН" else "⚪ Аватар Ауры поверх всех окон",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isOverlayOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = overlayAction,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            FilledTonalButton(
+                                onClick = {
+                                    if (isOverlayOn) {
+                                        AuraOverlayManager.hideOverlay()
+                                    } else {
+                                        val ok = AuraOverlayManager.showOverlay(context)
+                                        if (!ok) {
+                                            onSubmitCommand("Покажи аватар поверх всех окон", activity)
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.testTag("toggle_floating_avatar_button")
+                            ) {
+                                Text(if (isOverlayOn) "Скрыть" else "Показать")
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     // Instant Cross-App & System Voice Command Chips
                     Row(
@@ -638,29 +693,53 @@ private fun InteractiveVoiceOrb(
             )
         }
 
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                imageVector = when (orbMode) {
-                    VoiceOrbMode.LISTENING -> Icons.Default.Stop
-                    VoiceOrbMode.SPEAKING -> Icons.AutoMirrored.Filled.VolumeUp
-                    else -> Icons.Default.Mic
-                },
-                contentDescription = "Голосовое управление",
-                tint = Color(0xFF001F15),
-                modifier = Modifier.size(38.dp)
+        Box(
+            modifier = Modifier
+                .size(116.dp)
+                .clip(CircleShape)
+                .border(2.5.dp, activeColor, CircleShape),
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.img_aura_avatar_1792153220147),
+                contentDescription = "Аватар Ауры",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
             )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = when (orbMode) {
-                    VoiceOrbMode.LISTENING -> "СТОП"
-                    VoiceOrbMode.SPEAKING -> "ГОВОРИТ"
-                    VoiceOrbMode.THINKING -> "ИИ..."
-                    VoiceOrbMode.IDLE -> "ГОЛОС"
-                },
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF001F15)
-            )
+            Surface(
+                color = Color(0xCC060B16),
+                shape = RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = when (orbMode) {
+                            VoiceOrbMode.LISTENING -> Icons.Default.Stop
+                            VoiceOrbMode.SPEAKING -> Icons.AutoMirrored.Filled.VolumeUp
+                            else -> Icons.Default.Mic
+                        },
+                        contentDescription = "Голосовое управление",
+                        tint = activeColor,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = when (orbMode) {
+                            VoiceOrbMode.LISTENING -> "СТОП"
+                            VoiceOrbMode.SPEAKING -> "ГОВОРИТ"
+                            VoiceOrbMode.THINKING -> "АНАЛИЗ..."
+                            VoiceOrbMode.IDLE -> "ГОЛОС"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+            }
         }
     }
 }

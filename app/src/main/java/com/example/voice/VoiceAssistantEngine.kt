@@ -119,6 +119,10 @@ class VoiceAssistantEngine(
                 override fun onDone(utteranceId: String?) {
                     if (utteranceId == null || utteranceId == lastQueuedUtteranceId) {
                         _orbMode.value = VoiceOrbMode.IDLE
+                        com.example.system.AuraOverlayManager.updateStatus(
+                            com.example.system.AuraOverlayVisualState.IDLE,
+                            "Готова к вашей следующей команде"
+                        )
                         if (_isContinuousMode.value) {
                             _voiceStatusMessage.value = "Живой диалог: слушаю ваш ответ..."
                             mainHandler.postDelayed({
@@ -253,6 +257,10 @@ class VoiceAssistantEngine(
             if (clauses.isEmpty()) return
 
             _orbMode.value = VoiceOrbMode.SPEAKING
+            com.example.system.AuraOverlayManager.updateStatus(
+                com.example.system.AuraOverlayVisualState.SPEAKING,
+                text.take(45)
+            )
             engine.stop()
 
             val basePitch = _pitch.value
@@ -324,7 +332,11 @@ class VoiceAssistantEngine(
 
     fun setThinkingState() {
         _orbMode.value = VoiceOrbMode.THINKING
-        _voiceStatusMessage.value = "Аура анализирует запрос и управляет приложением..."
+        _voiceStatusMessage.value = "Аура анализирует экран и выполняет команду..."
+        com.example.system.AuraOverlayManager.updateStatus(
+            com.example.system.AuraOverlayVisualState.ANALYZING,
+            "Анализирую экран и команду..."
+        )
     }
 
     fun startListening() {
@@ -342,6 +354,10 @@ class VoiceAssistantEngine(
                         override fun onReadyForSpeech(params: Bundle?) {
                             _orbMode.value = VoiceOrbMode.LISTENING
                             _voiceStatusMessage.value = "Слушаю вас... Говорите свободно"
+                            com.example.system.AuraOverlayManager.updateStatus(
+                                com.example.system.AuraOverlayVisualState.LISTENING,
+                                "Слушаю вашу голосовую команду..."
+                            )
                         }
 
                         override fun onBeginningOfSpeech() {
@@ -391,6 +407,10 @@ class VoiceAssistantEngine(
                                 .orEmpty()
                             if (partial.isNotEmpty()) {
                                 _liveTranscript.value = partial
+                                com.example.system.AuraOverlayManager.updateStatus(
+                                    com.example.system.AuraOverlayVisualState.LISTENING,
+                                    "«$partial»"
+                                )
                             }
                         }
 
@@ -411,6 +431,14 @@ class VoiceAssistantEngine(
         } catch (e: Exception) {
             _orbMode.value = VoiceOrbMode.IDLE
             _voiceStatusMessage.value = "Не удалось запустить микрофон: ${e.localizedMessage ?: "ошибка"}"
+        }
+    }
+
+    fun toggleListening() {
+        if (_orbMode.value == VoiceOrbMode.LISTENING) {
+            stopListening()
+        } else {
+            startListening()
         }
     }
 
