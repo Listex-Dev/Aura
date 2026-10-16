@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - master
+      - fix/android-sdk-setup
     tags:
       - "v*"
   workflow_dispatch:
@@ -29,6 +30,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          api-level: 36
+          build-tools: '36.0.0'
+          components: 'platform-tools,build-tools;36.0.0,platforms;android-36,platforms;android-36.1'
+          packages: 'platform-tools build-tools;36.0.0 platforms;android-36 platforms;android-36.1'
 
       - name: Set up Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4
