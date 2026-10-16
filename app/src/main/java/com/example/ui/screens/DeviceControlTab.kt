@@ -108,9 +108,9 @@ fun DeviceControlTab(
     val screenElements by AuraAccessibilityService.screenElements.collectAsState()
     val isOverlayShowing by AuraOverlayManager.isOverlayShowing.collectAsState()
     val overlayVisualState by AuraOverlayManager.visualState.collectAsState()
-    val overlayActionText by AuraOverlayManager.currentActionText.collectAsState()
-    val lastAiReasoning by AuraOverlayManager.lastAiReasoning.collectAsState()
-    val lastTappedCoordinates by AuraOverlayManager.lastTappedCoordinates.collectAsState()
+    val overlayActionText: String by AuraOverlayManager.currentActionText.collectAsState()
+    val lastAiReasoning: String by AuraOverlayManager.lastAiReasoning.collectAsState()
+    val lastTappedCoordinates: String by AuraOverlayManager.lastTappedCoordinates.collectAsState()
     val a11yActive = isA11yConnected || telemetry.isAccessibilityEnabled
 
     val allPermissionsLauncher = rememberLauncherForActivityResult(

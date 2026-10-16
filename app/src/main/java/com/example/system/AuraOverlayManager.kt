@@ -27,31 +27,29 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import com.example.MainActivity
 import com.example.R
+import kotlin.math.abs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlin.math.abs
 
 enum class AuraOverlayVisualState(
     val badgeTitle: String,
     val ringColorHex: Int,
     val glowColorHex: Int
 ) {
-    IDLE("Аура на связи", 0xFF00E5FF.toInt(), 0x4400E5FF),
-    LISTENING("Слушаю вас...", 0xFF00E676.toInt(), 0x5500E676),
-    ANALYZING("Анализирую экран...", 0xFFFFD740.toInt(), 0x55FFD740),
-    ACTING("Выполняю действие...", 0xFFE040FB.toInt(), 0x55E040FB),
+    IDLE("Аура • ИИ-Контекст готов", 0xFF00E5FF.toInt(), 0x4400E5FF),
+    LISTENING("Слушаю команду...", 0xFF00E676.toInt(), 0x5500E676),
+    ANALYZING("Gemini анализирует экран...", 0xFFFFD740.toInt(), 0x55FFD740),
+    ACTING("Точное нажатие ИИ...", 0xFFE040FB.toInt(), 0x55E040FB),
     SPEAKING("Говорю...", 0xFF7C4DFF.toInt(), 0x557C4DFF)
 }
 
 /**
- * Manages Aura's floating avatar & live action HUD over all applications.
- * Supports both TYPE_ACCESSIBILITY_OVERLAY (automatic when AccessibilityService is enabled)
- * and TYPE_APPLICATION_OVERLAY (when SYSTEM_ALERT_WINDOW is granted).
+ * Manages Aura's floating avatar, live Gemini context HUD, and visual coordinate crosshair
+ * over all applications.
  */
 @SuppressLint("StaticFieldLeak")
 object AuraOverlayManager {
@@ -64,8 +62,14 @@ object AuraOverlayManager {
     private val _visualState = MutableStateFlow(AuraOverlayVisualState.IDLE)
     val visualState: StateFlow<AuraOverlayVisualState> = _visualState.asStateFlow()
 
-    private val _currentActionText = MutableStateFlow("Готова управлять любым приложением")
+    private val _currentActionText = MutableStateFlow("Готова понимать контекст и нажимать по точным координатам")
     val currentActionText: StateFlow<String> = _currentActionText.asStateFlow()
+
+    private val _lastAiReasoning = MutableStateFlow("Gemini ИИ: ожидание команды для анализа контекста и координат экрана")
+    val lastAiReasoning: StateFlow<String> = _lastAiReasoning.asStateFlow()
+
+    private val _lastTappedCoordinates = MutableStateFlow("")
+    val lastTappedCoordinates: StateFlow<String> = _lastTappedCoordinates.asStateFlow()
 
     private val _isExpanded = MutableStateFlow(false)
     val isExpanded: StateFlow<Boolean> = _isExpanded.asStateFlow()
@@ -76,11 +80,15 @@ object AuraOverlayManager {
     private var attachedContext: Context? = null
     private var isUsingAccessibilityWindow = false
 
+    // Active crosshair view for visual coordinate tap feedback
+    private var activeCrosshairView: View? = null
+
     // UI references inside floating view
     private var avatarImageView: ImageView? = null
     private var avatarRingContainer: FrameLayout? = null
     private var statusTitleView: TextView? = null
     private var statusSubtitleView: TextView? = null
+    private var aiReasoningTextView: TextView? = null
     private var expandedPanel: LinearLayout? = null
     private var elementsContainer: LinearLayout? = null
     private var screenSummaryTextView: TextView? = null
@@ -93,6 +101,116 @@ object AuraOverlayManager {
         _visualState.value = state
         _currentActionText.value = actionDescription
         mainHandler.post {
+            refreshOverlayUi()
+        }
+    }
+
+    fun updateAiContextReasoning(reasoning: String, coordinatesBadge: String = "") {
+        if (reasoning.isNotBlank()) {
+            _lastAiReasoning.value = reasoning
+        }
+        if (coordinatesBadge.isNotBlank()) {
+            _lastTappedCoordinates.value = coordinatesBadge
+        }
+        mainHandler.post {
+            refreshOverlayUi()
+        }
+    }
+
+    /**
+     * Renders a sleek glowing target crosshair at the exact (xPx, yPx) screen coordinates
+     * where Gemini AI decided to tap, so the user sees the exact coordinate hit in real time.
+     */
+    fun showTapCrosshair(xPx: Int, yPx: Int, label: String = "") {
+        val badge = if (label.isNotBlank()) {
+            "🎯 ($xPx, $yPx) • ${label.take(24)}"
+        } else {
+            "🎯 ($xPx, $yPx)"
+        }
+        _lastTappedCoordinates.value = badge
+
+        mainHandler.post {
+            val ctx = attachedContext ?: AuraAccessibilityService.instance.value ?: return@post
+            val wm = windowManager ?: (ctx.getSystemService(Context.WINDOW_SERVICE) as? WindowManager) ?: return@post
+
+            // Remove previous crosshair if still visible
+            activeCrosshairView?.let { oldView ->
+                try {
+                    wm.removeViewImmediate(oldView)
+                } catch (_: Exception) {
+                }
+                activeCrosshairView = null
+            }
+
+            try {
+                val windowType = if (AuraAccessibilityService.instance.value != null && isUsingAccessibilityWindow) {
+                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+                } else if (Settings.canDrawOverlays(ctx.applicationContext)) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                    } else {
+                        @Suppress("DEPRECATION")
+                        WindowManager.LayoutParams.TYPE_PHONE
+                    }
+                } else if (AuraAccessibilityService.instance.value != null) {
+                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+                } else {
+                    return@post
+                }
+
+                val targetSize = dp(ctx, 56)
+                val half = targetSize / 2
+
+                val container = FrameLayout(ctx).apply {
+                    val ring = View(ctx).apply {
+                        layoutParams = FrameLayout.LayoutParams(targetSize, targetSize, Gravity.CENTER)
+                        background = GradientDrawable().apply {
+                            shape = GradientDrawable.OVAL
+                            setColor(0x35E040FB)
+                            setStroke(dp(ctx, 3), 0xFF00E5FF.toInt())
+                        }
+                    }
+                    val centerDot = View(ctx).apply {
+                        val dotSize = dp(ctx, 14)
+                        layoutParams = FrameLayout.LayoutParams(dotSize, dotSize, Gravity.CENTER)
+                        background = GradientDrawable().apply {
+                            shape = GradientDrawable.OVAL
+                            setColor(0xFFE040FB.toInt())
+                            setStroke(dp(ctx, 2), Color.WHITE)
+                        }
+                    }
+                    addView(ring)
+                    addView(centerDot)
+                }
+
+                val params = WindowManager.LayoutParams(
+                    targetSize,
+                    targetSize,
+                    windowType,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    PixelFormat.TRANSLUCENT
+                ).apply {
+                    gravity = Gravity.TOP or Gravity.START
+                    x = (xPx - half).coerceAtLeast(0)
+                    y = (yPx - half).coerceAtLeast(0)
+                }
+
+                wm.addView(container, params)
+                activeCrosshairView = container
+
+                mainHandler.postDelayed({
+                    if (activeCrosshairView === container) {
+                        try {
+                            wm.removeViewImmediate(container)
+                        } catch (_: Exception) {
+                        }
+                        activeCrosshairView = null
+                    }
+                }, 1150L)
+            } catch (_: Exception) {
+            }
             refreshOverlayUi()
         }
     }
@@ -152,7 +270,7 @@ object AuraOverlayManager {
             ).apply {
                 gravity = Gravity.TOP or Gravity.START
                 x = dp(targetContext, 12)
-                y = dp(targetContext, 110)
+                y = dp(targetContext, 105)
             }
 
             val view = buildOverlayView(targetContext)
@@ -177,13 +295,20 @@ object AuraOverlayManager {
             return
         }
         try {
-            val view = rootView
             val wm = windowManager
+            activeCrosshairView?.let { ch ->
+                try {
+                    wm?.removeViewImmediate(ch)
+                } catch (_: Exception) {
+                }
+            }
+            val view = rootView
             if (view != null && wm != null) {
                 wm.removeViewImmediate(view)
             }
         } catch (_: Exception) {
         } finally {
+            activeCrosshairView = null
             rootView = null
             windowManager = null
             layoutParams = null
@@ -209,10 +334,11 @@ object AuraOverlayManager {
             val summaryTv = screenSummaryTextView ?: return@post
 
             val shortPkg = activePkg.substringAfterLast('.').ifBlank { "Экран" }
-            summaryTv.text = "Приложение: $shortPkg • Найдено элементов: ${elements.size}"
+            val coordsInfo = _lastTappedCoordinates.value.let { if (it.isNotBlank()) " • $it" else "" }
+            summaryTv.text = "Окно: $shortPkg • Элементов: ${elements.size}$coordsInfo"
 
             container.removeAllViews()
-            val clickableItems = elements.filter { it.isClickable || it.isEditable }.take(12)
+            val clickableItems = elements.filter { it.isClickable || it.isEditable }.take(16)
             if (clickableItems.isEmpty()) {
                 val emptyChip = createActionChip(ctx, "Нет активных кнопок (Нажмите «Обновить»)", 0xFF263238.toInt()) {
                     AuraAccessibilityService.instance.value?.inspectCurrentScreen()
@@ -222,12 +348,12 @@ object AuraOverlayManager {
             }
 
             for (el in clickableItems) {
-                val prefix = if (el.isEditable) "⌨️" else "👆"
-                val label = "$prefix #${el.index} ${el.label.take(20)}"
+                val prefix = if (el.isEditable) "⌨️" else "🎯"
+                val label = "$prefix #${el.index} ${el.label.take(18)} (${el.centerX},${el.centerY})"
                 val chip = createActionChip(ctx, label, 0xFF1E293B.toInt()) {
                     updateStatus(
                         AuraOverlayVisualState.ACTING,
-                        "Нажимаю #${el.index} «${el.label.take(18)}»"
+                        "Нажимаю #${el.index} «${el.label.take(16)}» (${el.centerX},${el.centerY})"
                     )
                     AuraAccessibilityService.instance.value?.clickElementByIndex(el.index)
                 }
@@ -244,6 +370,16 @@ object AuraOverlayManager {
         statusTitleView?.text = state.badgeTitle
         statusTitleView?.setTextColor(state.ringColorHex)
         statusSubtitleView?.text = actionText
+
+        val reasoningText = buildString {
+            append("🧠 ")
+            append(_lastAiReasoning.value)
+            if (_lastTappedCoordinates.value.isNotBlank()) {
+                append("\n")
+                append(_lastTappedCoordinates.value)
+            }
+        }
+        aiReasoningTextView?.text = reasoningText
 
         avatarRingContainer?.background = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
@@ -263,13 +399,13 @@ object AuraOverlayManager {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = dp(context, 26).toFloat()
-                setColor(0xEB0B1120.toInt())
-                setStroke(dp(context, 1), 0x5538BDF8)
+                setColor(0xEE0B1120.toInt())
+                setStroke(dp(context, 1), 0x6638BDF8)
             }
             setPadding(dp(context, 10), dp(context, 8), dp(context, 12), dp(context, 8))
         }
 
-        // Top compact row: [Circular Avatar] + [Live Status & What Aura Is Doing] + [Quick Mic] + [Analyze]
+        // Top compact row: [Circular Avatar] + [Live Status & What Aura Is Doing] + [Quick Mic] + [AI Context Scan]
         val topRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -347,32 +483,32 @@ object AuraOverlayManager {
                 setColor(0xFF0284C7.toInt())
             }
             setOnClickListener {
-                updateStatus(AuraOverlayVisualState.LISTENING, "Слушаю голосовую команду...")
+                updateStatus(AuraOverlayVisualState.LISTENING, "Слушаю голосовую команду по контексту...")
                 onMicCommandRequested?.invoke()
             }
         }
 
-        // Quick Screen Scan button on floating HUD
+        // Quick Gemini AI Context Scan button on floating HUD
         val scanBtn = TextView(context).apply {
-            text = "🔍"
+            text = "🧠"
             gravity = Gravity.CENTER
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             val btnSize = dp(context, 36)
             layoutParams = LinearLayout.LayoutParams(btnSize, btnSize)
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(0xFF4F46E5.toInt())
+                setColor(0xFF7C3AED.toInt())
             }
             setOnClickListener {
                 _isExpanded.value = true
                 refreshOverlayUi()
-                updateStatus(AuraOverlayVisualState.ANALYZING, "Сканирую все кнопки на экране...")
+                updateStatus(AuraOverlayVisualState.ANALYZING, "Сканирую контекст и координаты...")
                 val svc = AuraAccessibilityService.instance.value
                 if (svc != null) {
                     val elements = svc.inspectCurrentScreen()
                     updateStatus(
                         AuraOverlayVisualState.IDLE,
-                        "Экран проанализирован: ${elements.size} эл."
+                        "Координатная сетка готова: ${elements.size} эл."
                     )
                 } else {
                     updateStatus(
@@ -388,15 +524,37 @@ object AuraOverlayManager {
         topRow.addView(micBtn)
         topRow.addView(scanBtn)
 
-        // Expanded Interactive Inspector & Quick Control Panel
+        // Expanded Interactive Inspector & Gemini Context Panel
         val detailsLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             visibility = if (_isExpanded.value) View.VISIBLE else View.GONE
             setPadding(dp(context, 4), dp(context, 10), dp(context, 4), dp(context, 4))
         }
 
+        // Gemini Live Context & Coordinate Reasoning Box
+        val reasoningTv = TextView(context).apply {
+            text = "🧠 ${_lastAiReasoning.value}"
+            setTextColor(0xFFE2E8F0.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            setPadding(dp(context, 8), dp(context, 6), dp(context, 8), dp(context, 6))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(context, 12).toFloat()
+                setColor(0xFF1E1B4B.toInt())
+                setStroke(dp(context, 1), 0x55818CF8)
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                dp(context, 285),
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dp(context, 6)
+            }
+        }
+        aiReasoningTextView = reasoningTv
+        detailsLayout.addView(reasoningTv)
+
         val summaryTv = TextView(context).apply {
-            text = "Инспектор экрана: нажмите 🔍 для поиска всех кнопок"
+            text = "Координатная сетка экрана (нажмите для точного клика):"
             setTextColor(0xFF94A3B8.toInt())
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
             setPadding(0, 0, 0, dp(context, 6))
@@ -404,11 +562,11 @@ object AuraOverlayManager {
         screenSummaryTextView = summaryTv
         detailsLayout.addView(summaryTv)
 
-        // Horizontal scroll of live detected screen buttons (#1, #2, #3...)
+        // Horizontal scroll of live detected screen buttons with exact coordinates (#1 (x,y), #2 (x,y)...)
         val elementsScroll = HorizontalScrollView(context).apply {
             isHorizontalScrollBarEnabled = false
             layoutParams = LinearLayout.LayoutParams(
-                dp(context, 280),
+                dp(context, 285),
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
         }
@@ -419,14 +577,46 @@ object AuraOverlayManager {
         elementsScroll.addView(elementsRow)
         detailsLayout.addView(elementsScroll)
 
-        // Quick cross-app actions row
-        val actionsScroll = HorizontalScrollView(context).apply {
+        // Quick Gemini AI contextual commands row
+        val aiContextScroll = HorizontalScrollView(context).apply {
             isHorizontalScrollBarEnabled = false
             layoutParams = LinearLayout.LayoutParams(
-                dp(context, 280),
+                dp(context, 285),
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
                 topMargin = dp(context, 8)
+            }
+        }
+        val aiContextRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+
+        val aiContextCommands = listOf(
+            "🧠 ИИ: Понять экран и нажать главное" to "Проанализируй контекст экрана через Gemini и нажми на самый нужный целевой элемент",
+            "🔍 ИИ: Найти и нажать Поиск" to "Найди по контексту экрана кнопку или поле поиска и нажми туда по координатам",
+            "▶️ ИИ: Включить первый результат" to "Посмотри на контекст экрана и нажми на первое видео, трек или результат",
+            "❤️ ИИ: Поставить лайк" to "Найди на экране кнопку лайка или сердечка по контексту и нажми на её координаты",
+            "✉️ ИИ: Нажать Отправить" to "Найди кнопку отправки или подтверждения на экране и нажми по её координатам"
+        )
+
+        for ((label, cmd) in aiContextCommands) {
+            aiContextRow.addView(
+                createActionChip(context, label, 0xFF4C1D95.toInt()) {
+                    onQuickCommandRequested?.invoke(cmd)
+                }
+            )
+        }
+        aiContextScroll.addView(aiContextRow)
+        detailsLayout.addView(aiContextScroll)
+
+        // Quick cross-app system actions row
+        val actionsScroll = HorizontalScrollView(context).apply {
+            isHorizontalScrollBarEnabled = false
+            layoutParams = LinearLayout.LayoutParams(
+                dp(context, 285),
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dp(context, 6)
             }
         }
         val quickRow = LinearLayout(context).apply {
@@ -434,16 +624,12 @@ object AuraOverlayManager {
         }
 
         val quickActions = listOf(
-            "🔎 Анализ экрана" to {
+            "🔄 Обновить координаты" to {
                 val svc = AuraAccessibilityService.instance.value
                 if (svc != null) {
                     val items = svc.inspectCurrentScreen()
-                    updateStatus(AuraOverlayVisualState.IDLE, "Найдено ${items.size} элементов на экране")
+                    updateStatus(AuraOverlayVisualState.IDLE, "Найдено ${items.size} элементов с координатами")
                 }
-            },
-            "👆 Нажать #1" to {
-                AuraAccessibilityService.instance.value?.clickElementByIndex(1)
-                Unit
             },
             "⬇️ Скролл вниз" to {
                 AuraAccessibilityService.instance.value?.scrollOrSwipeScreen("DOWN")
@@ -459,10 +645,6 @@ object AuraOverlayManager {
             },
             "🏠 Домой" to {
                 AuraAccessibilityService.instance.value?.performGlobalSystemAction("HOME")
-                Unit
-            },
-            "📸 Скриншот" to {
-                AuraAccessibilityService.instance.value?.performGlobalSystemAction("SCREENSHOT")
                 Unit
             },
             "✨ Открыть Aura" to {

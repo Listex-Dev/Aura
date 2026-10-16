@@ -58,8 +58,8 @@ class AssistantViewModel(
     private val _lastExecution = MutableStateFlow(
         LastExecutionCard(
             userQuery = "Привет, Aura!",
-            assistantReply = "Здравствуйте! Я ваш голосовой ИИ-ассистент для управления Android. Нажмите на сферу микрофона или выберите команду ниже — я выполню действие и озвучу результат.",
-            actionBadges = listOf("ГОЛОСОВОЙ РЕЖИМ АКТИВЕН", "ОБЛАКО ПОДКЛЮЧЕНО")
+            assistantReply = "Здравствуйте! Я ваш голосовой ИИ-ассистент с пониманием контекста экрана и точным управлением по координатам через Gemini. Нажмите на микрофон или выберите команду.",
+            actionBadges = listOf("ГОЛОСОВОЙ РЕЖИМ АКТИВЕН", "GEMINI VISION АКТИВЕН")
         )
     )
     val lastExecution: StateFlow<LastExecutionCard> = _lastExecution.asStateFlow()
@@ -125,11 +125,8 @@ class AssistantViewModel(
             voiceEngine.setThinkingState()
             com.example.system.AuraOverlayManager.updateStatus(
                 com.example.system.AuraOverlayVisualState.ANALYZING,
-                "Анализирую: «${cleanQuery.take(28)}»"
+                "Gemini анализирует контекст и координаты: «${cleanQuery.take(24)}»"
             )
-
-            // Refresh screen inspection before planning so AI sees the latest buttons & inputs
-            com.example.system.AuraAccessibilityService.instance.value?.inspectCurrentScreen(silentOverlayStatus = true)
 
             // First check if query matches a saved routine trigger phrase
             val currentRoutines = (routinesState.value as? UiState.Success)?.data.orEmpty()
@@ -145,28 +142,72 @@ class AssistantViewModel(
 
             val appNames = telemetry.value.installedApps.map { it.label }
             val routineNames = currentRoutines.map { "${it.title} (${it.triggerPhrase})" }
-            val plan = geminiService.planCommand(
-                userQuery = cleanQuery,
-                deviceContextSummary = systemController.buildDeviceSummaryForAi(),
-                installedAppNames = appNames,
-                routineNames = routineNames
-            )
-
             val executedBadges = mutableListOf<String>()
-            var launchedAppInChain = false
-            for (action in plan.actions) {
-                if (action.actionType.equals("OPEN_APP", ignoreCase = true) ||
-                    action.actionType.equals("SEARCH_IN_APP", ignoreCase = true)
-                ) {
-                    launchedAppInChain = true
+            val stepsHistory = mutableListOf<String>()
+            var finalSpokenResponse = ""
+            var latestContextAnalysis = ""
+
+            var stepTurn = 0
+            val maxAutonomousTurns = 3
+            var shouldObserveAgain = true
+
+            while (shouldObserveAgain && stepTurn < maxAutonomousTurns) {
+                stepTurn++
+                // 1. Refresh live screen DOM + coordinates and capture live screenshot for Gemini Vision
+                com.example.system.AuraAccessibilityService.instance.value?.inspectCurrentScreen(silentOverlayStatus = true)
+                val screenshotBase64 = systemController.captureCurrentScreenBase64()
+
+                val plan = geminiService.planCommand(
+                    userQuery = cleanQuery,
+                    deviceContextSummary = systemController.buildDeviceSummaryForAi(),
+                    installedAppNames = appNames,
+                    routineNames = routineNames,
+                    screenshotBase64 = screenshotBase64,
+                    previousStepsHistory = stepsHistory
+                )
+
+                if (plan.screenContextAnalysis.isNotBlank()) {
+                    latestContextAnalysis = plan.screenContextAnalysis
+                    com.example.system.AuraOverlayManager.updateAiContextReasoning(plan.screenContextAnalysis)
                 }
-                val badge = executeSingleAndroidAction(action, activity, delayForCrossApp = launchedAppInChain)
-                if (badge.isNotBlank()) {
-                    executedBadges.add(badge)
+                if (plan.spokenResponse.isNotBlank() && finalSpokenResponse.isBlank()) {
+                    finalSpokenResponse = plan.spokenResponse
+                }
+
+                if (plan.actions.isEmpty()) {
+                    break
+                }
+
+                var launchedAppInStep = false
+                for (action in plan.actions) {
+                    if (action.actionType.equals("OPEN_APP", ignoreCase = true) ||
+                        action.actionType.equals("SEARCH_IN_APP", ignoreCase = true)
+                    ) {
+                        launchedAppInStep = true
+                    }
+                    val badge = executeSingleAndroidAction(action, activity, delayForCrossApp = launchedAppInStep)
+                    if (badge.isNotBlank()) {
+                        executedBadges.add(badge)
+                        stepsHistory.add("${action.actionType}(${action.target}, x=${action.x}, y=${action.y}) -> $badge")
+                    }
+                }
+
+                shouldObserveAgain = plan.requiresFollowUpObservation &&
+                    com.example.system.AuraAccessibilityService.isConnected.value
+                if (shouldObserveAgain && stepTurn < maxAutonomousTurns) {
+                    com.example.system.AuraOverlayManager.updateStatus(
+                        com.example.system.AuraOverlayVisualState.ANALYZING,
+                        "Жду загрузки нового экрана (шаг ${stepTurn + 1})..."
+                    )
+                    kotlinx.coroutines.delay(1800L)
                 }
             }
 
-            val spoken = plan.spokenResponse.ifBlank {
+            if (latestContextAnalysis.isNotBlank()) {
+                executedBadges.add(0, "🧠 ИИ-Контекст: ${latestContextAnalysis.take(55)}")
+            }
+
+            val spoken = finalSpokenResponse.ifBlank {
                 if (executedBadges.isNotEmpty()) {
                     "Готово! ${executedBadges.joinToString(", ")}"
                 } else {
@@ -176,7 +217,11 @@ class AssistantViewModel(
 
             _lastExecution.value = LastExecutionCard(
                 userQuery = cleanQuery,
-                assistantReply = spoken,
+                assistantReply = if (latestContextAnalysis.isNotBlank()) {
+                    "$spoken\n\n🎯 Контекст Gemini: $latestContextAnalysis"
+                } else {
+                    spoken
+                },
                 actionBadges = executedBadges.ifEmpty { listOf("ЖИВОЙ ОТВЕТ AURA") }
             )
 
@@ -195,9 +240,10 @@ class AssistantViewModel(
         delayForCrossApp: Boolean = false
     ): String {
         val crossAppDelay = if (delayForCrossApp) 1500L else 0L
+        val reasonNote = action.reason.ifBlank { "${action.actionType} ${action.target}".trim() }
         com.example.system.AuraOverlayManager.updateStatus(
             com.example.system.AuraOverlayVisualState.ACTING,
-            "Действие: ${action.actionType} ${action.target.take(18)}"
+            reasonNote.take(44)
         )
         return when (action.actionType.uppercase()) {
             "TORCH_ON" -> systemController.setTorch(true)
@@ -229,15 +275,55 @@ class AssistantViewModel(
             "ANALYZE_SCREEN" -> {
                 systemController.inspectCurrentScreenElements()
             }
-            "CLICK_UI" -> {
-                systemController.clickUiElementInApp(
-                    targetText = action.target.ifBlank { action.value },
+            "TAP_PIXEL" -> {
+                val coords = (action.target.ifBlank { action.value }).split(",")
+                val px = if (action.x > 0) action.x else coords.getOrNull(0)?.trim()?.toIntOrNull() ?: 540
+                val py = if (action.y > 0) action.y else coords.getOrNull(1)?.trim()?.toIntOrNull() ?: 960
+                systemController.tapExactPixelInApp(
+                    xPx = px,
+                    yPx = py,
+                    reasonLabel = action.reason.ifBlank { action.value.ifBlank { action.target } },
                     delayMs = crossAppDelay
                 )
             }
+            "LONG_PRESS_PIXEL" -> {
+                val coords = (action.target.ifBlank { action.value }).split(",")
+                val px = if (action.x > 0) action.x else coords.getOrNull(0)?.trim()?.toIntOrNull() ?: 540
+                val py = if (action.y > 0) action.y else coords.getOrNull(1)?.trim()?.toIntOrNull() ?: 960
+                systemController.longPressExactPixelInApp(
+                    xPx = px,
+                    yPx = py,
+                    reasonLabel = action.reason.ifBlank { action.target },
+                    delayMs = crossAppDelay
+                )
+            }
+            "SWIPE_PIXEL" -> {
+                val endParts = action.value.split(",")
+                val sx = if (action.x > 0) action.x else 540
+                val sy = if (action.y > 0) action.y else 1400
+                val ex = endParts.getOrNull(0)?.trim()?.toIntOrNull() ?: sx
+                val ey = endParts.getOrNull(1)?.trim()?.toIntOrNull() ?: 400
+                systemController.swipeCoordinatesInApp(sx, sy, ex, ey, delayMs = crossAppDelay)
+            }
+            "CLICK_UI" -> {
+                if (action.x > 0 && action.y > 0 && action.target.isBlank()) {
+                    systemController.tapExactPixelInApp(action.x, action.y, action.reason, delayMs = crossAppDelay)
+                } else {
+                    systemController.clickUiElementInApp(
+                        targetText = action.target.ifBlank { action.value },
+                        delayMs = crossAppDelay
+                    )
+                }
+            }
             "CLICK_INDEX" -> {
-                val idx = (action.target.ifBlank { action.value }).filter { it.isDigit() }.toIntOrNull() ?: 1
-                systemController.clickElementByIndex(idx, delayMs = crossAppDelay)
+                val idx = (action.target.ifBlank { action.value }).filter { it.isDigit() }.toIntOrNull()
+                if (idx != null) {
+                    systemController.clickElementByIndex(idx, reasonNote = action.reason, delayMs = crossAppDelay)
+                } else if (action.x > 0 && action.y > 0) {
+                    systemController.tapExactPixelInApp(action.x, action.y, action.reason, delayMs = crossAppDelay)
+                } else {
+                    systemController.clickElementByIndex(1, reasonNote = action.reason, delayMs = crossAppDelay)
+                }
             }
             "LONG_CLICK_UI" -> {
                 systemController.longClickUiElementInApp(
@@ -255,6 +341,8 @@ class AssistantViewModel(
                 systemController.inputTextInApp(
                     fieldHint = action.target,
                     textToType = action.value.ifBlank { action.target },
+                    targetX = action.x,
+                    targetY = action.y,
                     delayMs = crossAppDelay
                 )
             }
@@ -266,9 +354,9 @@ class AssistantViewModel(
             }
             "TAP_SCREEN" -> {
                 val coords = (action.target.ifBlank { action.value }).split(",")
-                val x = coords.getOrNull(0)?.trim()?.toFloatOrNull() ?: 50f
-                val y = coords.getOrNull(1)?.trim()?.toFloatOrNull() ?: 50f
-                systemController.tapScreenPercent(x, y, delayMs = crossAppDelay)
+                val x = if (action.x in 1..99) action.x.toFloat() else coords.getOrNull(0)?.trim()?.toFloatOrNull() ?: 50f
+                val y = if (action.y in 1..99) action.y.toFloat() else coords.getOrNull(1)?.trim()?.toFloatOrNull() ?: 50f
+                systemController.tapScreenPercent(x, y, reasonLabel = action.reason, delayMs = crossAppDelay)
             }
             "GLOBAL_ACTION" -> {
                 systemController.executeGlobalAccessibilityAction(action.target.ifBlank { action.value })

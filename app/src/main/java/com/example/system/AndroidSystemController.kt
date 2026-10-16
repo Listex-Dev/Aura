@@ -527,15 +527,57 @@ class AndroidSystemController(private val context: Context) {
         }
     }
 
-    fun clickElementByIndex(index: Int, delayMs: Long = 0L): String {
+    fun clickElementByIndex(index: Int, delayMs: Long): String {
+        return clickElementByIndex(index = index, reasonNote = "", delayMs = delayMs)
+    }
+
+    fun clickElementByIndex(index: Int, reasonNote: String = "", delayMs: Long = 0L): String {
         val svc = AuraAccessibilityService.instance.value
             ?: return "Включите Специальные возможности Aura для нажатия элемента #$index"
         return if (delayMs > 0L) {
-            AuraAccessibilityService.runDelayed(delayMs) { it.clickElementByIndex(index) }
+            AuraAccessibilityService.runDelayed(delayMs) { it.clickElementByIndex(index, reasonNote) }
             "Нажатие на элемент #$index"
         } else {
-            svc.clickElementByIndex(index)
+            svc.clickElementByIndex(index, reasonNote)
         }
+    }
+
+    fun tapExactPixelInApp(xPx: Int, yPx: Int, reasonLabel: String = "", delayMs: Long = 0L): String {
+        val svc = AuraAccessibilityService.instance.value
+            ?: return "Включите Специальные возможности Aura для клика по координатам ($xPx, $yPx)"
+        return if (delayMs > 0L) {
+            AuraAccessibilityService.runDelayed(delayMs) { it.tapExactPixel(xPx, yPx, reasonLabel) }
+            "Клик по координатам ($xPx, $yPx) • $reasonLabel"
+        } else {
+            svc.tapExactPixel(xPx, yPx, reasonLabel)
+        }
+    }
+
+    fun longPressExactPixelInApp(xPx: Int, yPx: Int, reasonLabel: String = "", delayMs: Long = 0L): String {
+        val svc = AuraAccessibilityService.instance.value
+            ?: return "Включите Специальные возможности Aura для удержания ($xPx, $yPx)"
+        return if (delayMs > 0L) {
+            AuraAccessibilityService.runDelayed(delayMs) { it.longPressExactPixel(xPx, yPx, reasonLabel) }
+            "Долгое нажатие ($xPx, $yPx) • $reasonLabel"
+        } else {
+            svc.longPressExactPixel(xPx, yPx, reasonLabel)
+        }
+    }
+
+    fun swipeCoordinatesInApp(startX: Int, startY: Int, endX: Int, endY: Int, delayMs: Long = 0L): String {
+        val svc = AuraAccessibilityService.instance.value
+            ?: return "Включите Специальные возможности Aura для свайпа по координатам"
+        return if (delayMs > 0L) {
+            AuraAccessibilityService.runDelayed(delayMs) { it.swipeExactPixels(startX, startY, endX, endY) }
+            "Свайп ($startX,$startY) -> ($endX,$endY)"
+        } else {
+            svc.swipeExactPixels(startX, startY, endX, endY)
+        }
+    }
+
+    suspend fun captureCurrentScreenBase64(): String? {
+        val svc = AuraAccessibilityService.instance.value ?: return null
+        return svc.captureScreenBase64Jpeg()
     }
 
     fun longClickUiElementInApp(targetText: String, delayMs: Long = 0L): String {
@@ -581,18 +623,24 @@ class AndroidSystemController(private val context: Context) {
         }
     }
 
-    fun inputTextInApp(fieldHint: String, textToType: String, delayMs: Long = 0L): String {
+    fun inputTextInApp(
+        fieldHint: String,
+        textToType: String,
+        targetX: Int = -1,
+        targetY: Int = -1,
+        delayMs: Long = 0L
+    ): String {
         val svc = AuraAccessibilityService.instance.value
         if (svc == null) {
             return "Для авто-ввода «$textToType» внутри приложений включите Специальные возможности Aura"
         }
         return if (delayMs > 0L) {
             AuraAccessibilityService.runDelayed(delayMs) {
-                it.inputTextIntoAppField(fieldHint, textToType, autoSubmit = true)
+                it.inputTextIntoAppField(fieldHint, textToType, autoSubmit = true, targetX = targetX, targetY = targetY)
             }
             "Ввод текста «$textToType» в открытом приложении"
         } else {
-            svc.inputTextIntoAppField(fieldHint, textToType, autoSubmit = true)
+            svc.inputTextIntoAppField(fieldHint, textToType, autoSubmit = true, targetX = targetX, targetY = targetY)
         }
     }
 
@@ -609,16 +657,16 @@ class AndroidSystemController(private val context: Context) {
         }
     }
 
-    fun tapScreenPercent(xPercent: Float, yPercent: Float, delayMs: Long = 0L): String {
+    fun tapScreenPercent(xPercent: Float, yPercent: Float, reasonLabel: String = "", delayMs: Long = 0L): String {
         val svc = AuraAccessibilityService.instance.value
         if (svc == null) {
             return "Для касания экрана включите Специальные возможности Aura"
         }
         return if (delayMs > 0L) {
-            AuraAccessibilityService.runDelayed(delayMs) { it.tapAtPercent(xPercent, yPercent) }
+            AuraAccessibilityService.runDelayed(delayMs) { it.tapAtPercent(xPercent, yPercent, reasonLabel) }
             "Касание экрана (${xPercent.toInt()}%, ${yPercent.toInt()}%)"
         } else {
-            svc.tapAtPercent(xPercent, yPercent)
+            svc.tapAtPercent(xPercent, yPercent, reasonLabel)
         }
     }
 
