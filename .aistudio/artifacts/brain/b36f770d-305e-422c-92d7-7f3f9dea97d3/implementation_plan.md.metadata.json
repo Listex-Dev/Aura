@@ -1,0 +1,6 @@
+{
+  "summary": "Архитектурный и продуктовый план разработки голосового AI-ассистента для управления Android («Aura Control») с интеграцией Gemini 3.5 Flash, Android SpeechRecognizer/TextToSpeech, системных Интентов/API управления устройством и облачной синхронизацией через Firebase Firestore и Google Sign-In.",
+  "updatedAt": "2026-10-16T07:16:54.307144206Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

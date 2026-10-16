@@ -1,0 +1,91 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidSmartItem(data) {
+      return data.keys().hasAll(['title', 'content', 'category', 'isCompleted', 'scheduledTime', 'userId', 'createdAt', 'updatedAt']) &&
+             data.keys().hasOnly(['title', 'content', 'category', 'isCompleted', 'scheduledTime', 'userId', 'createdAt', 'updatedAt']) &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+             data.content is string && data.content.size() <= 1000 &&
+             data.category is string && (data.category == 'NOTE' || data.category == 'TASK' || data.category == 'REMINDER') &&
+             data.isCompleted is bool &&
+             data.scheduledTime is string && data.scheduledTime.size() <= 64 &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidAutomationRoutine(data) {
+      return data.keys().hasAll(['title', 'triggerPhrase', 'iconName', 'actionSteps', 'userId', 'createdAt', 'updatedAt']) &&
+             data.keys().hasOnly(['title', 'triggerPhrase', 'iconName', 'actionSteps', 'userId', 'createdAt', 'updatedAt']) &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 100 &&
+             data.triggerPhrase is string && data.triggerPhrase.size() >= 1 && data.triggerPhrase.size() <= 120 &&
+             data.iconName is string && data.iconName.size() >= 1 && data.iconName.size() <= 40 &&
+             data.actionSteps is list && data.actionSteps.size() >= 1 && data.actionSteps.size() <= 10 &&
+             data.actionSteps[0] is string && data.actionSteps[0].size() <= 200 &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidCommandLog(data) {
+      return data.keys().hasAll(['userQuery', 'assistantReply', 'executedActions', 'userId', 'createdAt']) &&
+             data.keys().hasOnly(['userQuery', 'assistantReply', 'executedActions', 'userId', 'createdAt']) &&
+             data.userQuery is string && data.userQuery.size() >= 1 && data.userQuery.size() <= 500 &&
+             data.assistantReply is string && data.assistantReply.size() >= 1 && data.assistantReply.size() <= 1000 &&
+             data.executedActions is list && data.executedActions.size() <= 10 &&
+             (data.executedActions.size() == 0 || (data.executedActions[0] is string && data.executedActions[0].size() <= 200)) &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    match /users/{userId}/items/{itemId} {
+      allow get: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidId(itemId) && (resource == null || existing().userId == request.auth.uid);
+      allow list: if isSignedIn() && request.auth.uid == userId && existing().userId == request.auth.uid;
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidId(itemId) && isValidSmartItem(incoming());
+      allow update: if isSignedIn() && isValidSmartItem(incoming()) && request.auth.uid == userId && isValidId(userId) && isValidId(itemId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['title', 'content', 'category', 'isCompleted', 'scheduledTime', 'updatedAt']);
+      allow delete: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidId(itemId) && existing().userId == request.auth.uid;
+    }
+
+    match /users/{userId}/routines/{routineId} {
+      allow get: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidId(routineId) && (resource == null || existing().userId == request.auth.uid);
+      allow list: if isSignedIn() && request.auth.uid == userId && existing().userId == request.auth.uid;
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidId(routineId) && isValidAutomationRoutine(incoming());
+      allow update: if isSignedIn() && isValidAutomationRoutine(incoming()) && request.auth.uid == userId && isValidId(userId) && isValidId(routineId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['title', 'triggerPhrase', 'iconName', 'actionSteps', 'updatedAt']);
+      allow delete: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidId(routineId) && existing().userId == request.auth.uid;
+    }
+
+    match /users/{userId}/history/{logId} {
+      allow get: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidId(logId) && (resource == null || existing().userId == request.auth.uid);
+      allow list: if isSignedIn() && request.auth.uid == userId && existing().userId == request.auth.uid;
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidId(logId) && isValidCommandLog(incoming());
+      allow update: if false;
+      allow delete: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidId(logId) && existing().userId == request.auth.uid;
+    }
+  }
+}
